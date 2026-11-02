@@ -1,0 +1,439 @@
+import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
+import type {
+  Garment,
+  Person,
+  Outfit,
+  VtonJob,
+  GarmentCategory,
+  VtonCategory,
+} from "@/lib/types";
+
+interface WardrobeData {
+  persons: Person[];
+  garments: Garment[];
+  outfits: Outfit[];
+  jobs: VtonJob[];
+}
+
+const DATA_DIR = path.join(process.cwd(), "data");
+const DATA_FILE = path.join(DATA_DIR, "wardrobe.json");
+
+const INITIAL_DATA: WardrobeData = {
+  persons: [
+    {
+      id: "person-elena",
+      name: "Elena (Studio Model)",
+      image: "/samples/model.png",
+      isDefault: true,
+      createdAt: new Date(Date.now() - 86400000 * 7).toISOString(),
+    },
+    {
+      id: "person-sofia",
+      name: "Sofia (Studio Model)",
+      image: "/samples/model3.png",
+      isDefault: false,
+      createdAt: new Date(Date.now() - 86400000 * 3).toISOString(),
+    },
+  ],
+  garments: [
+    {
+      id: "garment-crewneck",
+      name: "Ivory Relaxed Crewneck",
+      image: "/samples/garment.webp",
+      category: "tops",
+      type: "Sweatshirt",
+      color: "Ivory",
+      colorHex: "#ECE8DD",
+      photoType: "flat-lay",
+      favorite: true,
+      createdAt: new Date(Date.now() - 86400000 * 5).toISOString(),
+    },
+    {
+      id: "garment-jeans",
+      name: "Vintage Washed Denim Jeans",
+      image: "/samples/baggy-jeans.jpg",
+      category: "bottoms",
+      type: "Wide Leg",
+      color: "Faded Denim",
+      colorHex: "#5E7287",
+      photoType: "flat-lay",
+      favorite: true,
+      createdAt: new Date(Date.now() - 86400000 * 4).toISOString(),
+    },
+    {
+      id: "garment-cargo",
+      name: "Onyx Technical Cargo Trousers",
+      image: "/samples/black-cargo-pants.png",
+      category: "bottoms",
+      type: "Cargo Trousers",
+      color: "Matte Black",
+      colorHex: "#1C1C1E",
+      photoType: "flat-lay",
+      favorite: false,
+      createdAt: new Date(Date.now() - 86400000 * 3).toISOString(),
+    },
+    {
+      id: "garment-shirt",
+      name: "Crisp Linen Button-Down",
+      image: "/samples/shirt.png",
+      category: "tops",
+      type: "Overshirt",
+      color: "Warm White",
+      colorHex: "#F7F6F2",
+      photoType: "flat-lay",
+      favorite: false,
+      createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
+    },
+    {
+      id: "garment-dress",
+      name: "Structured Silk Slip Dress",
+      image: "/samples/silk-slip-dress.jpg",
+      category: "one-pieces",
+      type: "Slip Dress",
+      color: "Midnight Noir",
+      colorHex: "#121214",
+      photoType: "flat-lay",
+      favorite: true,
+      createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
+    },
+    {
+      id: "garment-boots",
+      name: "Monochrome Leather Chelsea Boots",
+      image: "/samples/chelsea-boots.jpg",
+      category: "shoes",
+      type: "Chelsea Boots",
+      color: "Polished Black",
+      colorHex: "#18181A",
+      photoType: "flat-lay",
+      favorite: false,
+      createdAt: new Date(Date.now() - 86400000 * 1).toISOString(),
+    },
+  ],
+  outfits: [
+    {
+      id: "outfit-initial-1",
+      name: "Minimal Studio Look 01",
+      personId: "person-elena",
+      garmentIds: ["garment-crewneck", "garment-jeans"],
+      resultImage: "/samples/result.png",
+      category: "tops",
+      favorite: true,
+      createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
+    },
+  ],
+  jobs: [],
+};
+
+function readData(): WardrobeData {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(DATA_FILE)) {
+      fs.writeFileSync(DATA_FILE, JSON.stringify(INITIAL_DATA, null, 2), "utf-8");
+      return INITIAL_DATA;
+    }
+    const raw = fs.readFileSync(DATA_FILE, "utf-8");
+    return JSON.parse(raw) as WardrobeData;
+  } catch (err) {
+    console.error("Error reading wardrobe data, using fallback:", err);
+    return INITIAL_DATA;
+  }
+}
+
+function writeData(data: WardrobeData): void {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const tempFile = `${DATA_FILE}.tmp.${Date.now()}`;
+    fs.writeFileSync(tempFile, JSON.stringify(data, null, 2), "utf-8");
+    fs.renameSync(tempFile, DATA_FILE);
+  } catch (err) {
+    console.error("Error writing wardrobe data:", err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Garments
+// ---------------------------------------------------------------------------
+
+export function getGarments(filter?: {
+  category?: string;
+  q?: string;
+  sort?: string;
+}): Garment[] {
+  const data = readData();
+  let list = [...data.garments];
+
+  if (filter?.category && filter.category !== "all") {
+    list = list.filter((g) => g.category === filter.category);
+  }
+
+  if (filter?.q && filter.q.trim()) {
+    const term = filter.q.trim().toLowerCase();
+    list = list.filter(
+      (g) =>
+        g.name.toLowerCase().includes(term) ||
+        (g.type && g.type.toLowerCase().includes(term)) ||
+        (g.color && g.color.toLowerCase().includes(term)) ||
+        g.category.toLowerCase().includes(term)
+    );
+  }
+
+  if (filter?.sort === "oldest") {
+    list.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  } else if (filter?.sort === "name") {
+    list.sort((a, b) => a.name.localeCompare(b.name));
+  } else if (filter?.sort === "favorite") {
+    list.sort((a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0));
+  } else {
+    // Default newest
+    list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  return list;
+}
+
+export function getGarmentById(id: string): Garment | null {
+  const data = readData();
+  return data.garments.find((g) => g.id === id) || null;
+}
+
+export function createGarment(
+  item: Omit<Garment, "id" | "createdAt" | "favorite"> & { favorite?: boolean }
+): Garment {
+  const data = readData();
+  const newGarment: Garment = {
+    id: `garment-${crypto.randomUUID()}`,
+    name: item.name.trim(),
+    image: item.image,
+    category: item.category as GarmentCategory,
+    type: item.type?.trim() || undefined,
+    color: item.color?.trim() || undefined,
+    colorHex: item.colorHex || undefined,
+    photoType: item.photoType || "flat-lay",
+    favorite: Boolean(item.favorite),
+    createdAt: new Date().toISOString(),
+  };
+  data.garments.unshift(newGarment);
+  writeData(data);
+  return newGarment;
+}
+
+export function updateGarment(id: string, updates: Partial<Garment>): Garment | null {
+  const data = readData();
+  const index = data.garments.findIndex((g) => g.id === id);
+  if (index === -1) return null;
+  data.garments[index] = { ...data.garments[index], ...updates };
+  writeData(data);
+  return data.garments[index];
+}
+
+export function toggleFavoriteGarment(id: string): Garment | null {
+  const data = readData();
+  const index = data.garments.findIndex((g) => g.id === id);
+  if (index === -1) return null;
+  data.garments[index].favorite = !data.garments[index].favorite;
+  writeData(data);
+  return data.garments[index];
+}
+
+export function deleteGarment(id: string): boolean {
+  const data = readData();
+  const beforeLen = data.garments.length;
+  data.garments = data.garments.filter((g) => g.id !== id);
+  if (data.garments.length !== beforeLen) {
+    writeData(data);
+    return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Person Profiles
+// ---------------------------------------------------------------------------
+
+export function getPersons(): Person[] {
+  const data = readData();
+  return data.persons;
+}
+
+export function getPersonById(id: string): Person | null {
+  const data = readData();
+  return data.persons.find((p) => p.id === id) || null;
+}
+
+export function getDefaultPerson(): Person {
+  const data = readData();
+  const def = data.persons.find((p) => p.isDefault);
+  return def || data.persons[0];
+}
+
+export function createPerson(name: string, image: string, isDefault = false): Person {
+  const data = readData();
+  if (isDefault) {
+    for (const p of data.persons) p.isDefault = false;
+  }
+  const person: Person = {
+    id: `person-${crypto.randomUUID()}`,
+    name: name.trim(),
+    image,
+    isDefault,
+    createdAt: new Date().toISOString(),
+  };
+  data.persons.unshift(person);
+  writeData(data);
+  return person;
+}
+
+export function setDefaultPerson(id: string): Person | null {
+  const data = readData();
+  let found: Person | null = null;
+  for (const p of data.persons) {
+    if (p.id === id) {
+      p.isDefault = true;
+      found = p;
+    } else {
+      p.isDefault = false;
+    }
+  }
+  if (found) {
+    writeData(data);
+  }
+  return found;
+}
+
+export function updatePerson(id: string, updates: Partial<Person>): Person | null {
+  const data = readData();
+  const index = data.persons.findIndex((p) => p.id === id);
+  if (index === -1) return null;
+  data.persons[index] = { ...data.persons[index], ...updates };
+  writeData(data);
+  return data.persons[index];
+}
+
+export function deletePerson(id: string): boolean {
+  const data = readData();
+  if (data.persons.length <= 1) {
+    return false; // keep at least one profile
+  }
+  const wasDefault = data.persons.find((p) => p.id === id)?.isDefault;
+  data.persons = data.persons.filter((p) => p.id !== id);
+  if (wasDefault && data.persons.length > 0) {
+    data.persons[0].isDefault = true;
+  }
+  writeData(data);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Outfits
+// ---------------------------------------------------------------------------
+
+export function getOutfits(): Outfit[] {
+  const data = readData();
+  const garmentMap = new Map(data.garments.map((g) => [g.id, g]));
+  const personMap = new Map(data.persons.map((p) => [p.id, p]));
+
+  return data.outfits
+    .map((o) => ({
+      ...o,
+      person: personMap.get(o.personId),
+      garments: o.garmentIds.map((id) => garmentMap.get(id)).filter(Boolean) as Garment[],
+    }))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+export function getOutfitById(id: string): Outfit | null {
+  const outfits = getOutfits();
+  return outfits.find((o) => o.id === id) || null;
+}
+
+export function createOutfit(outfit: {
+  name?: string;
+  personId: string;
+  garmentIds: string[];
+  resultImage: string;
+  category?: string;
+  favorite?: boolean;
+}): Outfit {
+  const data = readData();
+  const newOutfit: Outfit = {
+    id: `outfit-${crypto.randomUUID()}`,
+    name: outfit.name?.trim() || `Look ${new Date().toLocaleDateString()}`,
+    personId: outfit.personId,
+    garmentIds: outfit.garmentIds,
+    resultImage: outfit.resultImage,
+    category: outfit.category || "tops",
+    favorite: Boolean(outfit.favorite),
+    createdAt: new Date().toISOString(),
+  };
+  data.outfits.unshift(newOutfit);
+  writeData(data);
+
+  const garmentMap = new Map(data.garments.map((g) => [g.id, g]));
+  const personMap = new Map(data.persons.map((p) => [p.id, p]));
+  return {
+    ...newOutfit,
+    person: personMap.get(newOutfit.personId),
+    garments: newOutfit.garmentIds.map((id) => garmentMap.get(id)).filter(Boolean) as Garment[],
+  };
+}
+
+export function toggleFavoriteOutfit(id: string): Outfit | null {
+  const data = readData();
+  const index = data.outfits.findIndex((o) => o.id === id);
+  if (index === -1) return null;
+  data.outfits[index].favorite = !data.outfits[index].favorite;
+  writeData(data);
+  return getOutfitById(id);
+}
+
+export function deleteOutfit(id: string): boolean {
+  const data = readData();
+  const beforeLen = data.outfits.length;
+  data.outfits = data.outfits.filter((o) => o.id !== id);
+  if (data.outfits.length !== beforeLen) {
+    writeData(data);
+    return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// VTON Jobs
+// ---------------------------------------------------------------------------
+
+export function getVtonJobs(): VtonJob[] {
+  const data = readData();
+  const garmentMap = new Map(data.garments.map((g) => [g.id, g]));
+  const personMap = new Map(data.persons.map((p) => [p.id, p]));
+
+  return data.jobs
+    .map((j) => ({
+      ...j,
+      person: personMap.get(j.personId),
+      garments: j.garmentIds.map((id) => garmentMap.get(id)).filter(Boolean) as Garment[],
+    }))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+export function getVtonJobById(id: string): VtonJob | null {
+  const jobs = getVtonJobs();
+  return jobs.find((j) => j.id === id) || null;
+}
+
+export function saveVtonJob(job: VtonJob): VtonJob {
+  const data = readData();
+  const index = data.jobs.findIndex((j) => j.id === job.id);
+  if (index >= 0) {
+    data.jobs[index] = job;
+  } else {
+    data.jobs.unshift(job);
+  }
+  writeData(data);
+  return job;
+}

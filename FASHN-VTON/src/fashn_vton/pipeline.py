@@ -2,8 +2,9 @@
 
 import logging
 import os
+import time
 from dataclasses import dataclass
-from typing import List, Literal, Optional
+from typing import Callable, List, Literal, Optional
 import torch_directml
 import cv2
 import numpy as np
@@ -168,11 +169,12 @@ class TryOnPipeline:
         person_poses: torch.Tensor,
         garment_poses: torch.Tensor,
         garment_categories: torch.Tensor,
-        num_timesteps: int = 20,
+        num_timesteps: int = 8,
         time_shift_mu: float = 1.5,
-        guidance_scale: float = 1.5,
-        skip_cfg_last_n_steps: int = 6,
+        guidance_scale: float = 2.0,
+        skip_cfg_last_n_steps: int = 5,
         use_tqdm: bool = True,
+        step_callback: Optional[Callable[[int, int], None]] = None,
     ) -> List[Image.Image]:
         """Euler sampling with CFG."""
         device, dtype = ca_images.device, ca_images.dtype
@@ -194,25 +196,22 @@ class TryOnPipeline:
         }
 
         # Euler sampling loop
-        # Pre-allocate t_vec once; fill_ each step to avoid per-step GPU allocation.
-        t_vec = torch.empty((batch_size,), dtype=dtype, device=device)
+        start_time = time.time()
+        total_steps = len(timesteps) - 1
 
         for step_idx, (t_curr, t_prev) in enumerate(
             tqdm(
                 zip(timesteps[:-1], timesteps[1:]),
                 desc="Sampling",
-                total=len(timesteps) - 1,
+                total=total_steps,
                 disable=not use_tqdm,
             )
         ):
+            step_start = time.time()
             dt = t_prev - t_curr
-            t_vec.fill_(t_curr)
+            t_vec = torch.full((batch_size,), t_curr, dtype=dtype, device=device)
 
-            # Skip CFG at final steps to prevent color saturation. When
-            # this is true, v_u is never used below, so don't pay for
-            # computing it (forward_for_cfg skips that forward pass
-            # entirely, saving a full transformer pass + CPU roundtrip
-            # on each of these steps).
+            # Skip CFG at final steps to prevent color saturation.
             skip_cfg = (
                 skip_cfg_last_n_steps > 0
                 and step_idx >= num_timesteps - skip_cfg_last_n_steps
@@ -231,6 +230,28 @@ class TryOnPipeline:
 
             images.add_(v_guided, alpha=dt)
 
+            step_dur = time.time() - step_start
+            elapsed = time.time() - start_time
+            rem_steps = total_steps - (step_idx + 1)
+            eta = rem_steps * step_dur
+            pct = int(((step_idx + 1) / total_steps) * 100)
+
+            if step_callback is not None:
+                try:
+                    step_callback(
+                        step=step_idx + 1,
+                        total_steps=total_steps,
+                        sec_per_it=round(step_dur, 2),
+                        elapsed_sec=round(elapsed, 1),
+                        eta_sec=round(eta, 1),
+                        percent=pct,
+                    )
+                except TypeError:
+                    try:
+                        step_callback(step_idx + 1, total_steps)
+                    except Exception:
+                        pass
+
         images = images.to(dtype=torch.float).clamp_(-1.0, 1.0)
         return [tensor_to_pil(img, unnormalize=True) for img in images]
 
@@ -239,14 +260,15 @@ class TryOnPipeline:
         self,
         person_image: Image.Image,
         garment_image: Image.Image,
-        category: Literal["tops", "bottoms", "one-pieces"],
-        garment_photo_type: Literal["model", "flat-lay"] = "model",
+        category: Literal["tops", "bottoms", "one-pieces"] = "tops",
+        garment_photo_type: Literal["model", "flat-lay"] = "flat-lay",
         num_samples: int = 1,
-        num_timesteps: int = 20,
-        guidance_scale: float = 1.5,
-        skip_cfg_last_n_steps: int = 6,
+        num_timesteps: int = 8,
+        guidance_scale: float = 2.0,
+        skip_cfg_last_n_steps: int = 5,
         seed: int = 42,
         segmentation_free: bool = True,
+        callback: Optional[Callable[[str, int, int, str], None]] = None,
     ) -> PipelineOutput:
         """
         Run virtual try-on inference.
@@ -364,6 +386,38 @@ class TryOnPipeline:
 
         # Run sampling
         self.logger.info(f"Running inference with {num_timesteps} timesteps...")
+        if callback is not None:
+            callback(
+                stage="generating",
+                step=0,
+                total_steps=num_timesteps,
+                detail="Starting diffusion Euler sampling...",
+                sec_per_it=0.0,
+                elapsed_sec=0.0,
+                eta_sec=0.0,
+                percent=0,
+            )
+
+        def _on_diffusion_step(**kwargs):
+            if callback is not None:
+                st = kwargs.get("step", 0)
+                tot = kwargs.get("total_steps", num_timesteps)
+                spi = kwargs.get("sec_per_it", 0.0)
+                ela = kwargs.get("elapsed_sec", 0.0)
+                eta = kwargs.get("eta_sec", 0.0)
+                pct = kwargs.get("percent", 0)
+                detail = f"Timestep {st}/{tot} [{pct}%] • {spi:.1f}s/it • ETA: {int(eta)//60:02d}:{int(eta)%60:02d}"
+                callback(
+                    stage="generating",
+                    step=st,
+                    total_steps=tot,
+                    detail=detail,
+                    sec_per_it=spi,
+                    elapsed_sec=ela,
+                    eta_sec=eta,
+                    percent=pct,
+                )
+
         images = self._sample(
             ca_images=ca_tensor,
             garment_images=garment_tensor,
@@ -373,7 +427,20 @@ class TryOnPipeline:
             num_timesteps=num_timesteps,
             guidance_scale=guidance_scale,
             skip_cfg_last_n_steps=skip_cfg_last_n_steps,
+            step_callback=_on_diffusion_step,
         )
+
+        if callback is not None:
+            callback(
+                stage="finalizing",
+                step=num_timesteps,
+                total_steps=num_timesteps,
+                detail="Unpadding & decoding high-res image...",
+                sec_per_it=0.0,
+                elapsed_sec=0.0,
+                eta_sec=0.0,
+                percent=100,
+            )
 
         # Unpad outputs
         images = [self.resize_pad_fn.unpad(img) for img in images]

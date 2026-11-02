@@ -1,41 +1,61 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { Fraunces, Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
-import { SiteNav } from "@/components/site-nav";
+import { AppNav } from "@/components/app-nav";
+import { WardrobeProvider } from "@/context/wardrobe-context";
 import "./globals.css";
 
-const fraunces = Fraunces({
-  subsets: ["latin"],
-  variable: "--font-fraunces",
-  style: ["normal", "italic"],
-});
-
-const grotesk = Space_Grotesk({
-  subsets: ["latin"],
-  variable: "--font-grotesk",
-});
-
-const plex = IBM_Plex_Mono({
-  subsets: ["latin"],
-  variable: "--font-plexmono",
-  weight: ["400", "500"],
-});
-
 export const metadata: Metadata = {
-  title: "fitcheck — the intelligent wardrobe",
+  title: {
+    default: "fitcheck — Private AI Wardrobe & Virtual Try-On Studio",
+    template: "%s · fitcheck",
+  },
   description:
-    "Upload your wardrobe, anchor a piece, and let the harmony engine pair your fits using colour theory and style codes.",
+    "Your private digital wardrobe and local AI virtual try-on studio. Organize clothing, build outfits, and render photorealistic looks with on-device FASHN-VTON. 100% local — photos never leave your machine.",
+  keywords: [
+    "virtual try-on",
+    "AI wardrobe",
+    "FASHN-VTON",
+    "local AI",
+    "fashion AI",
+    "private wardrobe",
+    "outfit generator",
+    "DirectML",
+  ],
+  authors: [{ name: "fitcheck Studio" }],
+  openGraph: {
+    title: "fitcheck — Private AI Wardrobe & Try-On Studio",
+    description:
+      "Organize your wardrobe and create photorealistic AI try-on looks, all locally on your device.",
+    type: "website",
+    locale: "en_US",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "fitcheck — Private AI Wardrobe & Try-On Studio",
+    description:
+      "Organize your wardrobe and create photorealistic AI try-on looks, all locally on your device.",
+  },
+  robots: {
+    index: false, // private local app — don't index
+    follow: false,
+  },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
-      <body
-        className={`${fraunces.variable} ${grotesk.variable} ${plex.variable} bg-bone font-body text-ink antialiased`}
-      >
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+      </head>
+      <body className="bg-bone font-body text-ink antialiased">
         <div className="grain" aria-hidden="true" />
-        <SiteNav />
-        {children}
+        <WardrobeProvider>
+          <AppNav />
+          <div className="min-h-screen lg:pl-64 flex flex-col transition-all duration-300">
+            {children}
+          </div>
+        </WardrobeProvider>
       </body>
     </html>
   );

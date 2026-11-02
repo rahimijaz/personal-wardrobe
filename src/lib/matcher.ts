@@ -65,6 +65,11 @@ const TEMPLATES: Record<Category, TemplateSlot[]> = {
     { slot: "accessories", required: false },
     { slot: "outerwear", required: false },
   ],
+  "one-pieces": [
+    { slot: "shoes", required: true },
+    { slot: "accessories", required: false },
+    { slot: "outerwear", required: false },
+  ],
 };
 
 function avg(nums: number[]): number {

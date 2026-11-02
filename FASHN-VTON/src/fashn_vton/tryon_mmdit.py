@@ -1277,7 +1277,7 @@ class TryOnModel(nn.Module):
 
     def __init__(
         self,
-        input_shape: Tuple[int] = (792, 528),
+        input_shape: Tuple[int] = (672  , 444),
         hidden_size: int = 1280,
         n_heads=10,
         double_blocks_depth: int = 8,
@@ -1513,9 +1513,7 @@ class TryOnModel(nn.Module):
         # already computes one v_c/v_u pair per step either way).
         # ------------------------------------------------------------------
 
-        # ------------------------------------------------------------------
-        # PRECOMPUTE STATIC GARMENT TOKENS (cached across steps)
-        # ------------------------------------------------------------------
+        # Precompute or retrieve static garment tokens
         garment_images = kwargs.get("garment_images")
         garment_poses = kwargs.get("garment_poses")
         garment_cond = None
@@ -1541,31 +1539,6 @@ class TryOnModel(nn.Module):
                 self._cached_garment_cond = garment_cond
                 self._cached_garment_uncond = garment_uncond
 
-        # ------------------------------------------------------------------
-        # PRECOMPUTE TIMESTEP + CATEGORY VEC (shared across cond/uncond)
-        #
-        # The cond and uncond passes differ only in the conditioning tokens;
-        # the timestep and category embeddings are identical for both.  We
-        # compute them once in forward_for_cfg and inject via precomputed_vec
-        # so that forward() skips t_embedder / y_embedder on the uncond call.
-        # ------------------------------------------------------------------
-        times = args[1] if len(args) > 1 else kwargs.get("times")
-        garment_categories = kwargs.get("garment_categories")
-        precomputed_vec = None
-
-        if times is not None:
-            precomputed_vec = self.t_embedder(times)
-            if exists(self.guidance_embedder):
-                guidance = kwargs.get("guidance")
-                if exists(guidance):
-                    precomputed_vec = precomputed_vec + self.guidance_embedder(guidance)
-            if exists(self.y_embedder) and exists(garment_categories):
-                # For cond pass the mask is all-True so y is unchanged;
-                # for uncond pass the mask zeros it.  The null class index
-                # is n_classes (the extra embedding row added in __init__).
-                # We use the cond y here (same as mask=all-True path).
-                precomputed_vec = precomputed_vec + self.y_embedder(garment_categories)
-
         cond_mask = torch.ones(
             batch_size,
             device=noisy_images.device,
@@ -1577,7 +1550,6 @@ class TryOnModel(nn.Module):
             **kwargs,
             mask=cond_mask,
             precomputed_garment=garment_cond,
-            precomputed_vec=precomputed_vec,
         )["x"]
 
         # The caller (the sampling loop) knows in advance whether v_u
@@ -1598,29 +1570,11 @@ class TryOnModel(nn.Module):
             dtype=torch.bool,
         )
 
-        # For the uncond vec: the original code called apply_conditional_dropout
-        # on garment_categories with mask=all-False, which zeroes the integer
-        # tensor to produce category index 0 for every sample.  Replicate that
-        # here by embedding zeros (index 0) instead of the real category.
-        if exists(self.y_embedder) and exists(garment_categories) and precomputed_vec is not None:
-            uncond_vec = self.t_embedder(times)
-            if exists(self.guidance_embedder):
-                guidance = kwargs.get("guidance")
-                if exists(guidance):
-                    uncond_vec = uncond_vec + self.guidance_embedder(guidance)
-            # Original uncond: apply_conditional_dropout zeros the category
-            # tensor → index 0 for all samples.
-            null_y = torch.zeros_like(garment_categories)
-            uncond_vec = uncond_vec + self.y_embedder(null_y)
-        else:
-            uncond_vec = precomputed_vec
-
         null_logits = self.forward(
             *args,
             **kwargs,
             mask=uncond_mask,
             precomputed_garment=garment_uncond,
-            precomputed_vec=uncond_vec,
         )["x"]
 
         return {
@@ -1644,7 +1598,6 @@ class TryOnModel(nn.Module):
         guidance: Optional[torch.Tensor] = None,
         garment_categories: Optional[torch.Tensor] = None,
         precomputed_garment: Optional[torch.Tensor] = None,
-        precomputed_vec: Optional[torch.Tensor] = None,
     ):
 
         # ==================================================================
@@ -1725,43 +1678,38 @@ class TryOnModel(nn.Module):
         # TIME & MODULATION
         # ==================================================================
 
-        if precomputed_vec is not None:
-            # Caller (forward_for_cfg) already computed t_embedder + y_embedder
-            # for this pass; reuse it to avoid redundant embedding lookups.
-            t = precomputed_vec
-        else:
-            t = self.t_embedder(times)
+        t = self.t_embedder(times)
 
-            if exists(self.guidance_embedder):
+        if exists(self.guidance_embedder):
 
-                assert exists(guidance), (
-                    "Guidance scale required for guidance distilled model"
+            assert exists(guidance), (
+                "Guidance scale required for guidance distilled model"
+            )
+
+            t = (
+                t
+                + self.guidance_embedder(
+                    guidance
                 )
+            )
 
-                t = (
-                    t
-                    + self.guidance_embedder(
-                        guidance
-                    )
-                )
+        if exists(self.y_embedder):
 
-            if exists(self.y_embedder):
+            assert exists(
+                garment_categories
+            ), (
+                "Category labels required for y_embedder"
+            )
 
-                assert exists(
-                    garment_categories
-                ), (
-                    "Category labels required for y_embedder"
-                )
+            y = apply_conditional_dropout(
+                garment_categories,
+                mask,
+            )
 
-                y = apply_conditional_dropout(
-                    garment_categories,
-                    mask,
-                )
-
-                t = (
-                    t
-                    + self.y_embedder(y)
-                )
+            t = (
+                t
+                + self.y_embedder(y)
+            )
 
         # ==================================================================
         # POSITIONAL EMBEDDINGS

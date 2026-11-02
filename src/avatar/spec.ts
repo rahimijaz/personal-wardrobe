@@ -46,6 +46,7 @@ function rgbDistHex(a: string, b: string): number {
 const CATEGORY_KIND: Record<WardrobeItem["category"], GarmentKind> = {
   tops: "top",
   bottoms: "bottom",
+  "one-pieces": "dress",
   shoes: "shoes",
   outerwear: "outerwear",
   accessories: "accessory",

@@ -1,369 +1,573 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { motion } from "framer-motion";
 import {
-  motion,
-  useMotionValue,
-  useSpring,
-  useTransform,
-} from "framer-motion";
-import {
-  ArrowRight,
-  ArrowUpRight,
-  Asterisk,
-  Camera,
-  MousePointerClick,
   Sparkles,
+  ArrowRight,
+  Shirt,
+  Layers,
+  Heart,
+  Plus,
+  ShieldCheck,
+  Cpu,
+  Clock,
+  ExternalLink,
+  TrendingUp,
+  Zap,
+  Star,
+  ArrowUpRight,
+  ChevronRight,
 } from "lucide-react";
-import { HarmonyLab } from "@/components/harmony-lab";
-import { ScoreDial } from "@/components/score-dial";
-import type { WardrobeItem } from "@/lib/types";
+import { useWardrobe } from "@/context/wardrobe-context";
+import { CATEGORIES, CATEGORY_LABEL, type GarmentCategory } from "@/lib/types";
 
-const fadeUp = {
-  initial: { opacity: 0, y: 28 },
-  whileInView: { opacity: 1, y: 0 },
-  viewport: { once: true, margin: "-80px" },
-  transition: { duration: 0.7, ease: [0.22, 1, 0.36, 1] as const },
+const CATEGORY_ICONS: Record<string, string> = {
+  tops: "👕",
+  bottoms: "👖",
+  "one-pieces": "👗",
+  shoes: "👟",
+  accessories: "💍",
 };
 
-function Hero() {
-  const ref = useRef<HTMLDivElement>(null);
-  const [pieces, setPieces] = useState<WardrobeItem[]>([]);
+const fadeUp = {
+  hidden: { opacity: 0, y: 18 },
+  visible: (i: number) => ({
+    opacity: 1,
+    y: 0,
+    transition: { delay: i * 0.07, duration: 0.45, ease: "easeOut" as const },
+  }),
+};
 
-  useEffect(() => {
-    fetch("/api/items")
-      .then((r) => r.json())
-      .then((d) => setPieces((d.items ?? []).slice(0, 3)))
-      .catch(() => {});
-  }, []);
+export default function DashboardPage() {
+  const {
+    garments,
+    outfits,
+    activePerson,
+    engineStatus,
+    isLoadingGarments,
+    toggleFavoriteGarment,
+  } = useWardrobe();
 
-  const mx = useMotionValue(0);
-  const my = useMotionValue(0);
-  const sx = useSpring(mx, { stiffness: 55, damping: 16 });
-  const sy = useSpring(my, { stiffness: 55, damping: 16 });
-  const f1x = useTransform(sx, (v) => v * 20);
-  const f1y = useTransform(sy, (v) => v * 14);
-  const f2x = useTransform(sx, (v) => v * -14);
-  const f2y = useTransform(sy, (v) => v * -10);
-  const f3x = useTransform(sx, (v) => v * 8);
-  const f3y = useTransform(sy, (v) => v * 18);
+  const recentGarments = garments.slice(0, 6);
+  const recentOutfits = outfits.slice(0, 3);
+  const favoriteCount = garments.filter((g) => g.favorite).length;
 
   return (
-    <section
-      ref={ref}
-      onMouseMove={(e) => {
-        const r = ref.current?.getBoundingClientRect();
-        if (!r) return;
-        mx.set((e.clientX - r.left) / r.width - 0.5);
-        my.set((e.clientY - r.top) / r.height - 0.5);
-      }}
-      className="relative overflow-hidden pt-14"
-    >
-      <div className="mx-auto grid max-w-6xl gap-14 px-4 pb-16 pt-14 sm:px-6 md:pt-20 lg:grid-cols-[1.05fr_0.95fr] lg:gap-10 lg:pb-24">
-        {/* Left — the pitch */}
-        <div className="flex flex-col justify-center">
-          <motion.div
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-            className="mb-7 flex items-center gap-3"
-          >
-            <span className="h-2 w-2 rounded-full bg-flame" />
-            <span className="font-mono text-[11px] uppercase tracking-[0.26em] text-ink-soft">
-              The intelligent wardrobe — vol. 01
-            </span>
-          </motion.div>
+    <div className="flex-1 page-enter">
+      {/* ── Hero Banner ── */}
+      <div className="relative overflow-hidden hero-gradient border-b border-line">
+        {/* Decorative mesh */}
+        <div className="absolute inset-0 mesh-pattern pointer-events-none" />
 
-          <motion.h1
-            initial={{ opacity: 0, y: 34 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.75, delay: 0.08 }}
-            className="font-display text-[17vw] leading-[0.94] tracking-tight sm:text-7xl md:text-8xl"
-          >
-            Stop
-            <br />
-            guessing.
-            <br />
-            <em className="italic text-flame">Start pairing.</em>
-          </motion.h1>
+        {/* Floating decorative circles */}
+        <div className="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-flame/5 blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-16 left-1/3 h-48 w-48 rounded-full bg-sage/8 blur-2xl pointer-events-none" />
 
-          <motion.p
-            initial={{ opacity: 0, y: 24 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7, delay: 0.2 }}
-            className="mt-7 max-w-md text-base leading-relaxed text-ink-soft md:text-lg"
-          >
-            Photograph your wardrobe once. Anchor any piece — a shirt, a boot,
-            a bag — and the harmony engine reads the colour of every thread to
-            build the fits that actually work.
-          </motion.p>
+        <div className="relative z-10 mx-auto max-w-7xl px-6 sm:px-8 md:px-10 py-10 sm:py-12">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
+            {/* Left: Headline + CTAs */}
+            <div className="max-w-2xl">
+              {/* Privacy badge */}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.4 }}
+                className="inline-flex items-center gap-2 rounded-full border border-emerald-600/20 dark:border-emerald-500/30 bg-emerald-500/10 dark:bg-emerald-500/15 px-3.5 py-1.5 text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 mb-5"
+              >
+                <ShieldCheck className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                <span>Private Studio · All inference runs on your device</span>
+              </motion.div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7, delay: 0.32 }}
-            className="mt-9 flex flex-wrap items-center gap-4"
-          >
+              <motion.h1
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+                className="font-display text-4xl sm:text-5xl md:text-[3.5rem] font-bold tracking-tight text-ink leading-[1.08]"
+              >
+                Your Private Wardrobe
+                <br />
+                <span className="gradient-text">&amp; AI Try-On Studio.</span>
+              </motion.h1>
+
+              <motion.p
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1, duration: 0.45 }}
+                className="mt-5 text-base sm:text-lg text-ink-soft leading-relaxed max-w-xl"
+              >
+                Organize your clothing locally, choose your persona, and render
+                photorealistic try-on looks with on-device FASHN-VTON diffusion.
+              </motion.p>
+
+              {/* Stats row */}
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.2 }}
+                className="mt-7 flex flex-wrap items-center gap-5"
+              >
+                <div className="flex items-center gap-3 rounded-2xl border border-line bg-paper/80 backdrop-blur-sm px-4 py-2.5 shadow-sm">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-flame/10">
+                    <Shirt className="h-4 w-4 text-flame" />
+                  </div>
+                  <div>
+                    <p className="font-display text-xl font-bold text-ink leading-none">{garments.length}</p>
+                    <p className="text-[11px] text-ink-soft mt-0.5">pieces cataloged</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 rounded-2xl border border-line bg-paper/80 backdrop-blur-sm px-4 py-2.5 shadow-sm">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sage/20">
+                    <Layers className="h-4 w-4 text-sage" />
+                  </div>
+                  <div>
+                    <p className="font-display text-xl font-bold text-ink leading-none">{outfits.length}</p>
+                    <p className="text-[11px] text-ink-soft mt-0.5">looks created</p>
+                  </div>
+                </div>
+                {favoriteCount > 0 && (
+                  <div className="flex items-center gap-3 rounded-2xl border border-line bg-paper/80 backdrop-blur-sm px-4 py-2.5 shadow-sm">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-500/10">
+                      <Heart className="h-4 w-4 text-red-500" />
+                    </div>
+                    <div>
+                      <p className="font-display text-xl font-bold text-ink leading-none">{favoriteCount}</p>
+                      <p className="text-[11px] text-ink-soft mt-0.5">favorites</p>
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+
+              {/* CTA buttons */}
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.28 }}
+                className="mt-8 flex flex-wrap items-center gap-3"
+              >
+                <Link
+                  href="/try-on"
+                  className="btn-primary inline-flex items-center gap-2.5 rounded-full bg-ink px-7 py-3.5 text-sm font-bold text-bone shadow-lg transition-all duration-200 hover:bg-flame hover:scale-[1.03] hover:shadow-xl"
+                >
+                  <Sparkles className="h-4 w-4 text-flame" />
+                  <span>Create a Look</span>
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+
+                <Link
+                  href="/wardrobe"
+                  className="inline-flex items-center gap-2 rounded-full border border-line bg-paper/90 backdrop-blur-sm px-5 py-3.5 text-sm font-semibold text-ink shadow-sm transition-all duration-200 hover:bg-bone-deep hover:scale-[1.02]"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Add Clothing</span>
+                </Link>
+              </motion.div>
+            </div>
+
+            {/* Right: Active Persona card */}
+            {activePerson ? (
+              <motion.div
+                initial={{ opacity: 0, x: 24 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.2, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+                className="shrink-0 w-full md:w-64"
+              >
+                <div className="relative overflow-hidden rounded-3xl border border-line bg-paper shadow-xl card-shadow">
+                  <div className="relative aspect-[3/4] w-full overflow-hidden img-zoom">
+                    <img
+                      src={activePerson.image}
+                      alt={activePerson.name}
+                      className="h-full w-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-ink/80 via-ink/10 to-transparent" />
+                    <div className="absolute top-3 left-3">
+                      <span className="badge-flame">
+                        <span className="h-1.5 w-1.5 rounded-full bg-flame animate-pulse" />
+                        Active Persona
+                      </span>
+                    </div>
+                    <div className="absolute bottom-0 inset-x-0 p-4 text-bone">
+                      <p className="font-display text-lg font-bold leading-tight">{activePerson.name}</p>
+                      <p className="text-[11px] text-bone/70 font-mono mt-0.5">Local Reference Model</p>
+                    </div>
+                  </div>
+                  <div className="p-3 flex items-center justify-between border-t border-line">
+                    <p className="text-[11px] text-ink-soft">Ready for VTON</p>
+                    <Link
+                      href="/profile"
+                      className="inline-flex items-center gap-1 text-xs font-bold text-flame hover:underline"
+                    >
+                      Change
+                      <ChevronRight className="h-3 w-3" />
+                    </Link>
+                  </div>
+                </div>
+              </motion.div>
+            ) : (
+              <motion.div
+                initial={{ opacity: 0, x: 24 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.2 }}
+                className="shrink-0 w-full md:w-64"
+              >
+                <Link href="/profile" className="group block">
+                  <div className="aspect-[3/4] w-full rounded-3xl border-2 border-dashed border-line bg-paper/60 flex flex-col items-center justify-center text-center p-6 transition-all duration-200 group-hover:border-ink group-hover:bg-bone-deep/50">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-bone-deep mb-3 group-hover:scale-110 transition-transform">
+                      <Plus className="h-7 w-7 text-ink-soft" />
+                    </div>
+                    <p className="text-sm font-semibold text-ink">Add Your Persona</p>
+                    <p className="text-[11px] text-ink-soft mt-1">Upload a reference photo</p>
+                  </div>
+                </Link>
+              </motion.div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Main Content ── */}
+      <div className="mx-auto max-w-7xl px-6 sm:px-8 md:px-10 py-10 space-y-12">
+
+        {/* ── Browse by Category ── */}
+        <motion.section
+          variants={fadeUp}
+          initial="hidden"
+          animate="visible"
+          custom={0}
+        >
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <h2 className="font-display text-2xl sm:text-3xl font-bold text-ink">Browse by Category</h2>
+              <p className="text-xs text-ink-soft mt-0.5">Your local wardrobe organized by type</p>
+            </div>
             <Link
               href="/wardrobe"
-              className="group inline-flex items-center gap-2.5 rounded-full bg-ink px-7 py-4 font-mono text-xs uppercase tracking-[0.18em] text-bone transition-colors hover:bg-flame"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-soft hover:text-ink transition-colors"
             >
-              Open the wardrobe
-              <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
+              <span>View All</span>
+              <ArrowRight className="h-3.5 w-3.5" />
             </Link>
-            <Link
-              href="/match"
-              className="inline-flex items-center gap-2 rounded-full border border-ink/25 px-7 py-4 font-mono text-xs uppercase tracking-[0.18em] text-ink transition-colors hover:border-ink hover:bg-bone-deep"
-            >
-              Pair a fit
-              <ArrowUpRight className="h-4 w-4" />
-            </Link>
-          </motion.div>
+          </div>
 
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.8, delay: 0.5 }}
-            className="mt-12 flex divide-x divide-line border-y border-line"
-          >
-            {[
-              ["33", "colour families"],
-              ["12", "style codes"],
-              ["03", "fits per anchor"],
-            ].map(([n, label]) => (
-              <div key={label} className="flex-1 px-4 py-4 first:pl-0">
-                <p className="font-display text-2xl md:text-3xl">{n}</p>
-                <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-ink-soft">
-                  {label}
-                </p>
-              </div>
-            ))}
-          </motion.div>
-        </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+            {CATEGORIES.map((cat, i) => {
+              const count = garments.filter((g) => g.category === cat).length;
+              const isVton = ["tops", "bottoms", "one-pieces"].includes(cat);
 
-        {/* Right — the collage */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.97 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.9, delay: 0.15 }}
-          className="relative mx-auto w-full max-w-md lg:max-w-none"
+              return (
+                <motion.div
+                  key={cat}
+                  variants={fadeUp}
+                  custom={i * 0.5}
+                  initial="hidden"
+                  animate="visible"
+                >
+                  <Link
+                    href={`/wardrobe?category=${cat}`}
+                    className="group relative flex flex-col overflow-hidden rounded-2xl border border-line bg-paper p-4 transition-all duration-250 hover:border-ink/40 hover:-translate-y-1 card-shadow"
+                  >
+                    {/* Hover glow */}
+                    <div className="absolute inset-0 bg-gradient-to-br from-flame/0 to-flame/0 group-hover:from-flame/3 group-hover:to-transparent transition-all duration-300 rounded-2xl pointer-events-none" />
+
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-2xl">{CATEGORY_ICONS[cat] || "🧣"}</span>
+                      {isVton && (
+                        <span className="flex h-1.5 w-1.5 rounded-full bg-flame animate-soft-pulse" title="Try-On Ready" />
+                      )}
+                    </div>
+
+                    <p className="font-display text-base font-bold text-ink group-hover:text-flame transition-colors leading-tight">
+                      {CATEGORY_LABEL[cat]}
+                    </p>
+
+                    <div className="mt-2 flex items-center justify-between">
+                      <span className="text-[11px] font-mono text-ink-soft">
+                        {count} {count === 1 ? "item" : "items"}
+                      </span>
+                      {isVton && (
+                        <span className="text-[10px] font-semibold text-flame/70 bg-flame/8 px-1.5 py-0.5 rounded-full">
+                          VTON
+                        </span>
+                      )}
+                    </div>
+                  </Link>
+                </motion.div>
+              );
+            })}
+          </div>
+        </motion.section>
+
+        {/* ── Recent Pieces ── */}
+        <motion.section
+          variants={fadeUp}
+          initial="hidden"
+          animate="visible"
+          custom={1}
         >
-          <div className="relative border border-line bg-paper p-3 shadow-[14px_14px_0_0_#17140e]">
-            <div className="relative aspect-[4/5] overflow-hidden bg-bone-deep">
-              <img
-                src="/images/hero.jpg"
-                alt="Editorial look — sand trench, rust knit, indigo denim"
-                className="h-full w-full object-cover"
-              />
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <h2 className="font-display text-2xl sm:text-3xl font-bold text-ink">Recent Pieces</h2>
+              <p className="text-xs text-ink-soft mt-0.5">Latest additions to your digital wardrobe</p>
             </div>
-            <div className="flex items-center justify-between px-1 pt-3">
-              <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-soft">
-                Look nº01 — sand × rust × indigo
-              </span>
-              <Asterisk className="h-4 w-4 text-flame" />
+            <Link
+              href="/wardrobe"
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-flame hover:underline"
+            >
+              <span>Manage Wardrobe ({garments.length})</span>
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+
+          {isLoadingGarments ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+              {[1, 2, 3, 4, 5, 6].map((n) => (
+                <div
+                  key={n}
+                  className="aspect-[3/4] rounded-2xl border border-line animate-shimmer"
+                />
+              ))}
+            </div>
+          ) : recentGarments.length === 0 ? (
+            <div className="rounded-3xl border-2 border-dashed border-line bg-paper/50 p-12 text-center">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-bone-deep mb-4">
+                <Shirt className="h-8 w-8 text-ink-soft" />
+              </div>
+              <h3 className="font-display text-lg font-bold text-ink">No garments yet</h3>
+              <p className="text-sm text-ink-soft mt-2 max-w-xs mx-auto leading-relaxed">
+                Start building your digital wardrobe by uploading your first clothing item.
+              </p>
+              <Link
+                href="/wardrobe"
+                className="mt-5 inline-flex items-center gap-2 rounded-full bg-ink px-5 py-2.5 text-xs font-bold text-bone hover:bg-flame transition-colors shadow-md"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Add Your First Piece
+              </Link>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+              {recentGarments.map((garment, i) => (
+                <motion.div
+                  key={garment.id}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.05 + i * 0.06 }}
+                  className="group relative flex flex-col overflow-hidden rounded-2xl border border-line bg-paper card-shadow transition-all duration-200 hover:-translate-y-1.5"
+                >
+                  <div className="relative aspect-[3/4] w-full overflow-hidden bg-bone-deep img-zoom">
+                    <img
+                      src={garment.image}
+                      alt={garment.name}
+                      className="h-full w-full object-cover"
+                    />
+
+                    {/* Overlay on hover */}
+                    <div className="absolute inset-0 bg-ink/0 group-hover:bg-ink/10 transition-colors duration-300" />
+
+                    <button
+                      onClick={() => toggleFavoriteGarment(garment.id)}
+                      className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-full bg-paper/85 backdrop-blur-md shadow-sm transition-all hover:scale-110 active:scale-95"
+                      aria-label="Toggle favorite"
+                    >
+                      <Heart
+                        className={`h-3.5 w-3.5 transition-colors ${
+                          garment.favorite
+                            ? "fill-flame text-flame"
+                            : "text-ink-soft group-hover:text-ink"
+                        }`}
+                      />
+                    </button>
+
+                    <span className="absolute bottom-2 left-2 rounded-full bg-ink/80 px-2 py-0.5 text-[10px] font-mono text-bone backdrop-blur-sm uppercase">
+                      {garment.category}
+                    </span>
+                  </div>
+
+                  <div className="p-3">
+                    <h4 className="text-xs font-bold text-ink truncate">{garment.name}</h4>
+                    <div className="mt-1.5 flex items-center justify-between text-[11px] text-ink-soft">
+                      <span className="truncate">{garment.color || garment.type || "Studio"}</span>
+                      <Link
+                        href={`/try-on?garmentId=${garment.id}`}
+                        className="text-flame font-bold hover:underline text-[10px] shrink-0 ml-1"
+                      >
+                        Try On →
+                      </Link>
+                    </div>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          )}
+        </motion.section>
+
+        {/* ── Recent AI Looks ── */}
+        {recentOutfits.length > 0 && (
+          <motion.section
+            variants={fadeUp}
+            initial="hidden"
+            animate="visible"
+            custom={2}
+          >
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h2 className="font-display text-2xl sm:text-3xl font-bold text-ink">Recent AI Looks</h2>
+                <p className="text-xs text-ink-soft mt-0.5">Saved outfits generated with local FASHN-VTON</p>
+              </div>
+              <Link
+                href="/outfits"
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-flame hover:underline"
+              >
+                <span>View All Looks</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5">
+              {recentOutfits.map((outfit, i) => (
+                <motion.div
+                  key={outfit.id}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1 + i * 0.08 }}
+                  className="group overflow-hidden rounded-3xl border border-line bg-paper card-shadow transition-all duration-200 hover:-translate-y-1"
+                >
+                  <div className="relative aspect-[3/4] w-full overflow-hidden img-zoom">
+                    <img
+                      src={outfit.resultImage}
+                      alt={outfit.name}
+                      className="h-full w-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-ink/60 via-transparent to-transparent" />
+                    <div className="absolute top-3 left-3">
+                      <span className="badge-flame">
+                        <Sparkles className="h-2.5 w-2.5" />
+                        AI Generated
+                      </span>
+                    </div>
+                    <span className="absolute bottom-3 left-3 rounded-full bg-ink/80 px-2.5 py-1 text-[11px] font-mono text-bone backdrop-blur-md">
+                      {new Date(outfit.createdAt).toLocaleDateString()}
+                    </span>
+                  </div>
+
+                  <div className="p-4 flex items-center justify-between">
+                    <div className="min-w-0">
+                      <h3 className="font-bold text-sm text-ink truncate">{outfit.name}</h3>
+                      <p className="text-[11px] text-ink-soft mt-0.5">
+                        {outfit.garments?.length || outfit.garmentIds.length} pieces paired
+                      </p>
+                    </div>
+                    <Link
+                      href={`/outfits?id=${outfit.id}`}
+                      className="shrink-0 ml-3 rounded-full border border-line bg-bone px-3 py-1.5 text-xs font-semibold text-ink transition-all hover:bg-ink hover:text-bone hover:border-ink"
+                    >
+                      Details
+                    </Link>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </motion.section>
+        )}
+
+        {/* ── Quick Actions Grid ── */}
+        <motion.section
+          variants={fadeUp}
+          initial="hidden"
+          animate="visible"
+          custom={3}
+        >
+          <h2 className="font-display text-2xl sm:text-3xl font-bold text-ink mb-5">Quick Actions</h2>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[
+              {
+                href: "/try-on",
+                icon: Sparkles,
+                iconColor: "text-flame",
+                iconBg: "bg-flame/10",
+                title: "Virtual Try-On",
+                desc: "Render photorealistic try-on looks using local AI diffusion.",
+                cta: "Open Studio",
+              },
+              {
+                href: "/wardrobe",
+                icon: Shirt,
+                iconColor: "text-ink",
+                iconBg: "bg-bone-deep",
+                title: "My Wardrobe",
+                desc: "Browse, search, and organize your digital clothing catalog.",
+                cta: "Open Wardrobe",
+              },
+              {
+                href: "/outfits",
+                icon: Layers,
+                iconColor: "text-sage",
+                iconBg: "bg-sage/15",
+                title: "Saved Outfits",
+                desc: "View your gallery of AI-generated try-on looks and saved styles.",
+                cta: "View Gallery",
+              },
+            ].map((item, i) => {
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="group flex flex-col rounded-3xl border border-line bg-paper p-5 transition-all duration-200 hover:border-ink/30 hover:-translate-y-1 card-shadow"
+                >
+                  <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${item.iconBg} mb-4 group-hover:scale-110 transition-transform`}>
+                    <Icon className={`h-5 w-5 ${item.iconColor}`} />
+                  </div>
+                  <h3 className="font-display text-lg font-bold text-ink group-hover:text-flame transition-colors">
+                    {item.title}
+                  </h3>
+                  <p className="text-xs text-ink-soft mt-1.5 leading-relaxed flex-1">{item.desc}</p>
+                  <div className="mt-4 flex items-center gap-1 text-xs font-bold text-ink-soft group-hover:text-ink transition-colors">
+                    <span>{item.cta}</span>
+                    <ArrowUpRight className="h-3.5 w-3.5" />
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </motion.section>
+
+        {/* ── Hardware Status Footer ── */}
+        <motion.div
+          variants={fadeUp}
+          initial="hidden"
+          animate="visible"
+          custom={4}
+          className="rounded-2xl border border-line bg-paper/60 backdrop-blur-sm px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+        >
+          <div className="flex items-center gap-3">
+            <div className={`relative flex h-10 w-10 items-center justify-center rounded-xl border border-line ${engineStatus?.online ? "bg-emerald-500/10" : "bg-bone-deep"}`}>
+              <Cpu className={`h-5 w-5 ${engineStatus?.online ? "text-emerald-600 dark:text-emerald-400" : "text-flame"}`} />
+              {engineStatus?.online && (
+                <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-emerald-500 border-2 border-paper" />
+              )}
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-ink">
+                {engineStatus?.online ? "VTON Engine Active" : "Local Hardware Ready"}
+              </h4>
+              <p className="text-[11px] text-ink-soft">
+                {engineStatus?.message || "Connected to local DirectML pipeline."}
+              </p>
             </div>
           </div>
 
-          {/* floating score sticker */}
-          <motion.div
-            style={{ x: f1x, y: f1y }}
-            className="absolute -right-4 -top-6 rotate-6 border border-line bg-paper p-3 shadow-[8px_8px_0_0_#17140e] md:-right-8"
-          >
-            <ScoreDial value={94} size={92} stroke={7} label="harmony" />
-          </motion.div>
-
-          {/* floating palette readout */}
-          <motion.div
-            style={{ x: f2x, y: f2y }}
-            className="absolute -left-4 bottom-16 -rotate-3 border border-line bg-paper px-4 py-3 shadow-[8px_8px_0_0_#17140e] md:-left-10"
-          >
-            <p className="mb-2 font-mono text-[9px] uppercase tracking-[0.2em] text-ink-soft">
-              Palette readout
-            </p>
-            <div className="flex gap-1.5">
-              {["#cbb18c", "#b2552b", "#2e4070", "#f0ead9", "#17140e"].map(
-                (c) => (
-                  <span
-                    key={c}
-                    className="h-6 w-6 rounded-sm border border-line"
-                    style={{ background: c }}
-                  />
-                ),
-              )}
-            </div>
-          </motion.div>
-
-          {/* floating wardrobe thumbs */}
-          <motion.div
-            style={{ x: f3x, y: f3y }}
-            className="absolute -bottom-8 right-6 flex -space-x-4"
-          >
-            {pieces.slice(0, 3).map((p, i) => (
-              <div
-                key={p.id}
-                className="h-20 w-20 overflow-hidden rounded-full border-2 border-bone bg-bone-deep shadow-[5px_5px_0_0_#17140e]"
-                style={{ transform: `rotate(${i * 8 - 8}deg)` }}
-              >
-                <img
-                  src={p.imagePath}
-                  alt={p.name}
-                  className="h-full w-full object-cover"
-                />
-              </div>
-            ))}
-          </motion.div>
-        </motion.div>
-      </div>
-
-      {/* marquee */}
-      <div className="overflow-hidden border-y border-line bg-paper py-3.5">
-        <div className="animate-marquee flex w-max items-center gap-8 pr-8">
-          {[0, 1].map((dup) => (
-            <div key={dup} className="flex items-center gap-8" aria-hidden={dup === 1}>
-              {[
-                "Complementary",
-                "Analogous",
-                "Tonal",
-                "Triadic",
-                "Neutral ground",
-                "Contrast play",
-                "Anchored neutral",
-              ].map((word) => (
-                <span key={`${dup}-${word}`} className="flex items-center gap-8">
-                  <span className="whitespace-nowrap font-mono text-xs uppercase tracking-[0.3em] text-ink-soft">
-                    {word}
-                  </span>
-                  <Asterisk className="h-4 w-4 shrink-0 text-flame" />
-                </span>
-              ))}
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-const STEPS = [
-  {
-    index: "01",
-    title: "Snap it",
-    icon: Camera,
-    body: "Shoot a piece on any background. We pull its palette straight off the pixels — no spreadsheet required.",
-  },
-  {
-    index: "02",
-    title: "Anchor it",
-    icon: MousePointerClick,
-    body: "Pick the one thing you actually want to wear today. A shirt, a boot, a tote — anything can start a fit.",
-  },
-  {
-    index: "03",
-    title: "Pair it",
-    icon: Sparkles,
-    body: "The engine scores every combination on the colour wheel, weighted by your style codes. Top three fits, served.",
-  },
-];
-
-function Steps() {
-  return (
-    <section className="mx-auto max-w-6xl px-4 py-20 sm:px-6 md:py-28">
-      <motion.p {...fadeUp} className="mb-3 font-mono text-[11px] uppercase tracking-[0.24em] text-flame">
-        The method
-      </motion.p>
-      <motion.h2
-        {...fadeUp}
-        className="max-w-2xl font-display text-4xl leading-[1.02] tracking-tight md:text-6xl"
-      >
-        Three moves to <em className="italic">dressed.</em>
-      </motion.h2>
-
-      <div className="mt-14 grid gap-px overflow-hidden border border-line bg-line md:grid-cols-3">
-        {STEPS.map((step, i) => (
-          <motion.article
-            key={step.index}
-            initial={{ opacity: 0, y: 26 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: "-60px" }}
-            transition={{ duration: 0.6, delay: i * 0.12 }}
-            className="group relative bg-bone p-7 transition-colors hover:bg-paper"
-          >
-            <div className="mb-10 flex items-start justify-between">
-              <span className="font-display text-5xl italic text-ink/15 transition-colors duration-300 group-hover:text-flame">
-                {step.index}
-              </span>
-              <span className="flex h-11 w-11 items-center justify-center rounded-full border border-line transition-colors duration-300 group-hover:border-flame group-hover:bg-flame group-hover:text-bone">
-                <step.icon className="h-5 w-5" strokeWidth={1.8} />
-              </span>
-            </div>
-            <h3 className="font-display text-2xl italic tracking-tight">
-              {step.title}
-            </h3>
-            <p className="mt-3 text-sm leading-relaxed text-ink-soft">
-              {step.body}
-            </p>
-          </motion.article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function CtaBand() {
-  return (
-    <section className="bg-ink text-bone">
-      <div className="mx-auto max-w-6xl px-4 py-24 text-center sm:px-6 md:py-32">
-        <motion.p
-          {...fadeUp}
-          className="mb-5 font-mono text-[11px] uppercase tracking-[0.26em] text-flame"
-        >
-          Ready when you are
-        </motion.p>
-        <motion.h2
-          {...fadeUp}
-          className="mx-auto max-w-3xl font-display text-5xl leading-[0.98] tracking-tight md:text-7xl"
-        >
-          Wear it like <em className="italic text-flame">you meant it.</em>
-        </motion.h2>
-        <motion.div {...fadeUp} className="mt-10 flex flex-wrap items-center justify-center gap-4">
           <Link
-            href="/wardrobe"
-            className="group inline-flex items-center gap-2.5 rounded-full bg-flame px-8 py-4 font-mono text-xs uppercase tracking-[0.18em] text-bone transition-colors hover:bg-bone hover:text-ink"
+            href="/settings"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-soft hover:text-ink transition-colors"
           >
-            Build your wardrobe
-            <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
+            <span>Engine Diagnostics</span>
+            <ExternalLink className="h-3.5 w-3.5" />
           </Link>
-          <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-bone/50">
-            Free · Local · Yours
-          </span>
         </motion.div>
-      </div>
-    </section>
-  );
-}
 
-function Footer() {
-  return (
-    <footer className="border-t border-line bg-ink pb-8 pt-6 text-bone">
-      <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 font-mono text-[10px] uppercase tracking-[0.2em] text-bone/45 sm:flex-row sm:px-6">
-        <span className="flex items-center gap-1.5">
-          <Asterisk className="h-3.5 w-3.5 text-flame" /> fitcheck © 2026
-        </span>
-        <span>harmony engine v2 — built on the colour wheel</span>
       </div>
-    </footer>
-  );
-}
-
-export default function LandingPage() {
-  return (
-    <main>
-      <Hero />
-      <Steps />
-      <HarmonyLab />
-      <CtaBand />
-      <Footer />
-    </main>
+    </div>
   );
 }

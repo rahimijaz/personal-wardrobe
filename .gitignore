@@ -21,6 +21,9 @@ next-env.d.ts
 # These live outside the web root and must never be published.
 # ------------------------------------------------------------------
 .data/
+data/
+project-structure.txt
+
 
 # User-uploaded wardrobe photos. The demo assets in public/seed and
 # public/images ARE committed; real uploads are not.

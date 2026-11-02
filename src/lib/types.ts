@@ -1,59 +1,128 @@
 export const CATEGORIES = [
   "tops",
   "bottoms",
-  "shoes",
+  "one-pieces",
   "outerwear",
-  "accessories",
   "dresses",
+  "shoes",
+  "accessories",
 ] as const;
 
 export type Category = (typeof CATEGORIES)[number];
+export type GarmentCategory = Category;
+export type VtonCategory = "tops" | "bottoms" | "one-pieces";
+
+export const VTON_CATEGORIES: VtonCategory[] = ["tops", "bottoms", "one-pieces"];
 
 export const CATEGORY_LABEL: Record<Category, string> = {
   tops: "Tops",
   bottoms: "Bottoms",
-  shoes: "Shoes",
+  "one-pieces": "One-Pieces",
   outerwear: "Layers",
-  accessories: "Extras",
   dresses: "Dresses",
+  shoes: "Shoes",
+  accessories: "Accessories",
 };
 
 export const CATEGORY_SINGLE: Record<Category, string> = {
   tops: "Top",
   bottoms: "Bottom",
-  shoes: "Shoes",
+  "one-pieces": "One-Piece",
   outerwear: "Layer",
-  accessories: "Extra",
   dresses: "Dress",
+  shoes: "Shoes",
+  accessories: "Accessory",
 };
 
-export const STYLE_TAGS = [
-  "casual",
-  "minimal",
-  "streetwear",
-  "formal",
-  "business",
-  "sporty",
-  "cozy",
-  "vintage",
-  "edgy",
-  "preppy",
-  "bohemian",
-  "y2k",
-] as const;
+export type GarmentPhotoType = "flat-lay" | "model";
 
-export type StyleTag = (typeof STYLE_TAGS)[number];
+export interface Garment {
+  id: string;
+  name: string;
+  image: string;
+  category: GarmentCategory;
+  type?: string;
+  color?: string;
+  colorHex?: string;
+  photoType: GarmentPhotoType;
+  favorite: boolean;
+  createdAt: string;
+}
 
-export const OCCASIONS = [
-  { id: "everyday", label: "Everyday", tags: ["casual", "minimal"] },
-  { id: "office", label: "Office", tags: ["business", "formal", "minimal"] },
-  { id: "date", label: "Date night", tags: ["edgy", "minimal", "vintage"] },
-  { id: "party", label: "Party", tags: ["streetwear", "edgy", "y2k"] },
-  { id: "active", label: "Active", tags: ["sporty", "casual"] },
-  { id: "formal", label: "Formal", tags: ["formal", "business"] },
-] as const;
+export interface Person {
+  id: string;
+  name: string;
+  image: string;
+  isDefault?: boolean;
+  createdAt: string;
+}
 
-export type OccasionId = (typeof OCCASIONS)[number]["id"];
+export interface Outfit {
+  id: string;
+  name: string;
+  personId: string;
+  garmentIds: string[];
+  resultImage: string;
+  favorite: boolean;
+  category?: VtonCategory | string;
+  createdAt: string;
+  person?: Person;
+  garments?: Garment[];
+}
+
+export type JobStatus = "queued" | "processing" | "completed" | "failed";
+export type JobStage =
+  | "queued"
+  | "preparing_person"
+  | "preparing_garment"
+  | "generating"
+  | "finalizing"
+  | "completed";
+
+export interface VtonJob {
+  id: string;
+  personId: string;
+  garmentIds: string[];
+  category: VtonCategory;
+  garmentPhotoType: GarmentPhotoType;
+  status: JobStatus;
+  stage: JobStage;
+  result: string | null;
+  step?: number;
+  total_steps?: number;
+  detail?: string;
+  sec_per_it?: number;
+  elapsed_sec?: number;
+  eta_sec?: number;
+  percent?: number;
+  logs?: string[];
+  error?: string | null;
+  params?: Partial<InferenceParameters>;
+  createdAt: string;
+  completedAt?: string;
+  person?: Person;
+  garments?: Garment[];
+}
+
+export interface InferenceParameters {
+  numTimesteps: number;
+  skipCfgLastNSteps: number;
+  guidanceScale: number;
+  seed: number;
+  randomSeed: boolean;
+  garmentPhotoType: GarmentPhotoType;
+  device: string;
+}
+
+export const DEFAULT_INFERENCE_PARAMETERS: InferenceParameters = {
+  numTimesteps: 8,
+  skipCfgLastNSteps: 5,
+  guidanceScale: 2.0,
+  seed: 42,
+  randomSeed: false,
+  garmentPhotoType: "flat-lay",
+  device: "directml",
+};
 
 export interface WardrobeItem {
   id: string;
@@ -103,6 +172,32 @@ export interface SavedOutfit {
   tryOnImageUrl: string | null;
   createdAt: string;
 }
+
+export const OCCASIONS = [
+  { id: "everyday", label: "Everyday", tags: ["casual", "minimal"] },
+  { id: "office", label: "Office", tags: ["business", "formal", "minimal"] },
+  { id: "date", label: "Date night", tags: ["edgy", "minimal", "vintage"] },
+  { id: "party", label: "Party", tags: ["streetwear", "edgy", "y2k"] },
+  { id: "active", label: "Active", tags: ["sporty", "casual"] },
+  { id: "formal", label: "Formal", tags: ["formal", "business"] },
+] as const;
+
+export type OccasionId = (typeof OCCASIONS)[number]["id"];
+
+export const STYLE_TAGS = [
+  "casual",
+  "minimal",
+  "streetwear",
+  "formal",
+  "business",
+  "sporty",
+  "cozy",
+  "vintage",
+  "edgy",
+  "preppy",
+] as const;
+
+export type StyleTag = (typeof STYLE_TAGS)[number];
 
 export function titleCase(s: string): string {
   return s.replace(/\w\S*/g, (w) => w[0].toUpperCase() + w.slice(1));

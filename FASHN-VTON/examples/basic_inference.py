@@ -23,43 +23,49 @@ Example:
         --category tops
         """,
     )
-    parser.add_argument("--weights-dir", type=str, required=True, help="Directory containing model weights")
-    parser.add_argument("--person-image", type=str, required=True, help="Path to person image")
-    parser.add_argument("--garment-image", type=str, required=True, help="Path to garment image")
+    parser.add_argument("--weights-dir", type=str, default="./weights", help="Directory containing model weights (default: ./weights)")
+    parser.add_argument("--person-image", type=str, default="./examples/data/model.png", help="Path to person image (default: ./examples/data/model.png)")
+    parser.add_argument("--garment-image", type=str, default="./examples/data/garment.webp", help="Path to garment image (default: ./examples/data/garment.webp)")
     parser.add_argument(
         "--category",
         type=str,
         choices=["tops", "bottoms", "one-pieces"],
-        required=True,
-        help="Garment category to try on",
+        default="tops",
+        help="Garment category to try on (default: tops)",
     )
     parser.add_argument(
         "--garment-photo-type",
         type=str,
         choices=["model", "flat-lay"],
-        default="model",
-        help="'model' if worn by person, 'flat-lay' for product shots",
+        default="flat-lay",
+        help="'model' if worn by person, 'flat-lay' for product shots (default: flat-lay)",
     )
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="outputs",
-        help="Output directory (created if doesn't exist)",
+        default="./outputs",
+        help="Output directory (default: ./outputs)",
     )
     parser.add_argument(
         "--num-samples",
         type=int,
         default=1,
-        help="Number of output images to generate (1-4)",
+        help="Number of output images to generate (1-4, default: 1)",
     )
     parser.add_argument(
         "--num-timesteps",
         type=int,
-        default=20,
-        help="Diffusion steps: 20=fast, 30=balanced, 50=quality",
+        default=8,
+        help="Diffusion steps (default: 8)",
     )
-    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
-    parser.add_argument("--guidance-scale", type=float, default=1.5, help="Classifier-free guidance strength")
+    parser.add_argument(
+        "--skip-cfg-last-n-steps",
+        type=int,
+        default=5,
+        help="Skip CFG for the final N diffusion steps (default: 5)",
+    )
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility (default: 42)")
+    parser.add_argument("--guidance-scale", type=float, default=2.0, help="Classifier-free guidance strength (default: 2.0)")
     parser.add_argument(
         "--no-segmentation-free",
         action="store_false",
@@ -67,7 +73,7 @@ Example:
         default=True,
         help="Disable segmentation-free mode. Default (enabled) preserves body features and allows unconstrained garment volume",
     )
-    parser.add_argument("--device", type=str, default=None, help="Device to use (cuda/cpu)")
+    parser.add_argument("--device", type=str, default="directml", help="Device to use (directml/cuda/cpu, default: directml)")
     args = parser.parse_args()
 
     # Validate inputs exist
@@ -106,6 +112,7 @@ Example:
         guidance_scale=args.guidance_scale,
         seed=args.seed,
         segmentation_free=args.segmentation_free,
+        skip_cfg_last_n_steps=args.skip_cfg_last_n_steps,
     )
 
     # Save outputs
