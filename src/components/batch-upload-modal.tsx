@@ -29,7 +29,10 @@ import {
   type GarmentPhotoType,
   type Garment,
 } from "@/lib/types";
-import { inferGarmentMetaFromFilename } from "@/lib/garment-utils";
+import {
+  inferGarmentMetaFromFilename,
+  detectCategoryFromImageSrc,
+} from "@/lib/garment-utils";
 
 export interface BatchItem {
   id: string;
@@ -38,6 +41,7 @@ export interface BatchItem {
   dataUrl?: string; // Base64 data URI
   name: string;
   category: GarmentCategory;
+  isAutoDetected?: boolean;
   photoType: GarmentPhotoType;
   status: "idle" | "removing_bg" | "saving" | "completed" | "failed";
   progressMessage?: string;
@@ -81,12 +85,33 @@ export function BatchUploadModal({
         previewUrl: URL.createObjectURL(file),
         name: meta.name,
         category: meta.category,
+        isAutoDetected: !meta.hasExplicitCategory,
         photoType: meta.photoType,
         status: "idle",
       };
     });
 
     setItems((prev) => [...prev, ...newItems]);
+
+    // Fast client-side silhouette analysis to auto-detect tops vs bottoms
+    newItems.forEach((item) => {
+      const meta = inferGarmentMetaFromFilename(item.file.name);
+      detectCategoryFromImageSrc(item.previewUrl).then((detectedCat) => {
+        setItems((prev) =>
+          prev.map((it) => {
+            if (it.id === item.id) {
+              const shouldApply = !meta.hasExplicitCategory && bulkCategory === "keep";
+              return {
+                ...it,
+                category: shouldApply ? detectedCat : it.category,
+                isAutoDetected: shouldApply,
+              };
+            }
+            return it;
+          })
+        );
+      });
+    });
 
     // Read files into base64 dataUrls asynchronously
     newItems.forEach((item) => {
@@ -209,6 +234,15 @@ export function BatchUploadModal({
             if (bgData.image) {
               imageToSave = bgData.image;
               cutoutUrl = bgData.image;
+              // Re-verify category against clean cutout mask
+              if (cutoutUrl) {
+                try {
+                  const refinedCat = await detectCategoryFromImageSrc(cutoutUrl);
+                  if (refinedCat && refinedCat !== "tops" && item.category === "tops") {
+                    item.category = refinedCat;
+                  }
+                } catch {}
+              }
             }
           } else {
             console.warn("Background removal notice: Proceeding with original photo");
@@ -227,6 +261,7 @@ export function BatchUploadModal({
           it.id === item.id
             ? {
                 ...it,
+                category: item.category,
                 status: "saving",
                 cutoutPreview: cutoutUrl,
                 progressMessage: "Extracting color palette & saving...",
@@ -241,6 +276,7 @@ export function BatchUploadModal({
         body: JSON.stringify({
           name: item.name.trim() || "Wardrobe Piece",
           category: item.category,
+          isExplicitCategory: true,
           photoType: item.photoType,
           image: imageToSave,
         }),
@@ -529,23 +565,30 @@ export function BatchUploadModal({
 
                     <div className="flex flex-wrap items-center gap-2 text-xs">
                       {/* Category selector */}
-                      <select
-                        value={item.category}
-                        disabled={isProcessing || item.status === "completed"}
-                        onChange={(e) => {
-                          const val = e.target.value as GarmentCategory;
-                          setItems((prev) =>
-                            prev.map((it) => (it.id === item.id ? { ...it, category: val } : it))
-                          );
-                        }}
-                        className="rounded-md border border-line bg-bone px-2 py-0.5 text-[11px] font-medium text-ink focus:outline-none cursor-pointer"
-                      >
-                        {CATEGORIES.map((cat) => (
-                          <option key={cat} value={cat}>
-                            {CATEGORY_SINGLE[cat]}
-                          </option>
-                        ))}
-                      </select>
+                      <div className="flex items-center gap-1.5">
+                        <select
+                          value={item.category}
+                          disabled={isProcessing || item.status === "completed"}
+                          onChange={(e) => {
+                            const val = e.target.value as GarmentCategory;
+                            setItems((prev) =>
+                              prev.map((it) => (it.id === item.id ? { ...it, category: val, isAutoDetected: false } : it))
+                            );
+                          }}
+                          className="rounded-md border border-line bg-bone px-2 py-0.5 text-[11px] font-medium text-ink focus:outline-none cursor-pointer"
+                        >
+                          {CATEGORIES.map((cat) => (
+                            <option key={cat} value={cat}>
+                              {CATEGORY_SINGLE[cat]}
+                            </option>
+                          ))}
+                        </select>
+                        {item.isAutoDetected && (
+                          <span className="text-[10px] font-mono text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 whitespace-nowrap">
+                            AI detected
+                          </span>
+                        )}
+                      </div>
 
                       {/* Photo Type */}
                       <select

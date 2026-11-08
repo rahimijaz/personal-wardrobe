@@ -44,11 +44,23 @@ export function extractPaletteFromPixels(
   const bx = Math.max(2, Math.floor(width * 0.09));
   const by = Math.max(2, Math.floor(height * 0.09));
 
+  // Determine alpha threshold dynamically so cutouts with partial/soft alpha ranges
+  // are never completely discarded down to 0 pixels.
+  let minAlpha = 255;
+  let maxAlpha = 0;
+  for (let i = 3; i < data.length; i += 16) {
+    const a = data[i];
+    if (a < minAlpha) minAlpha = a;
+    if (a > maxAlpha) maxAlpha = a;
+  }
+  const isCutout = (maxAlpha - minAlpha) > 20;
+  const alphaThreshold = isCutout ? minAlpha + (maxAlpha - minAlpha) * 0.45 : 128;
+
   for (let y = 0; y < height; y += step) {
     for (let x = 0; x < width; x += step) {
       const i = (y * width + x) * 4;
       const alpha = data[i + 3];
-      if (alpha !== undefined && alpha < 200) continue;
+      if (alpha !== undefined && alpha < alphaThreshold) continue;
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
@@ -109,7 +121,7 @@ export function extractPaletteFromPixels(
     keptWc / totalWc > MIN_CENTER_SHARE;
 
   // Garments live centre-frame: rank by centre-region weight first.
-  const source = (suppress ? kept : withAvg).sort(
+  const source = (suppress && kept.length > 0 ? kept : withAvg).sort(
     (a, b) => b.wc - a.wc || b.w - a.w,
   );
 

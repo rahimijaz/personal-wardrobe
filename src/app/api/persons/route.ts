@@ -3,6 +3,8 @@ import { getPersons, createPerson, getDefaultPerson } from "@/server/storage";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import sharp from "sharp";
+import { detectBodySilhouetteFromPixels } from "@/lib/persona-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +46,21 @@ export async function POST(req: Request) {
         const filePath = path.join(uploadsDir, fileName);
         fs.writeFileSync(filePath, buffer);
         image = `/uploads/${fileName}`;
+
+        // Auto-detect silhouette if not provided
+        if (!calibration?.bodySilhouette) {
+          try {
+            const raw = await sharp(filePath)
+              .resize(128, 256, { fit: "fill" })
+              .ensureAlpha()
+              .raw()
+              .toBuffer({ resolveWithObject: true });
+            const sil = detectBodySilhouetteFromPixels(raw.data, raw.info.width, raw.info.height);
+            calibration = { ...(calibration || {}), bodySilhouette: sil };
+          } catch (e) {
+            console.warn("Server-side body silhouette detection fallback:", e);
+          }
+        }
       } else if (typeof formData.get("image") === "string") {
         image = formData.get("image") as string;
       }
@@ -53,6 +70,37 @@ export async function POST(req: Request) {
       image = body.image || "";
       isDefault = Boolean(body.isDefault);
       calibration = body.calibration;
+
+      // If image is a base64 or public path, save & detect
+      if (image.startsWith("data:")) {
+        try {
+          const matches = image.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+          if (matches) {
+            const ext = matches[1] === "jpeg" ? "jpg" : matches[1];
+            const buffer = Buffer.from(matches[2], "base64");
+            const uploadsDir = path.join(process.cwd(), "public", "uploads");
+            if (!fs.existsSync(uploadsDir)) {
+              fs.mkdirSync(uploadsDir, { recursive: true });
+            }
+            const fileName = `person-${crypto.randomUUID()}.${ext}`;
+            const filePath = path.join(uploadsDir, fileName);
+            fs.writeFileSync(filePath, buffer);
+            image = `/uploads/${fileName}`;
+
+            if (!calibration?.bodySilhouette) {
+              const raw = await sharp(filePath)
+                .resize(128, 256, { fit: "fill" })
+                .ensureAlpha()
+                .raw()
+                .toBuffer({ resolveWithObject: true });
+              const sil = detectBodySilhouetteFromPixels(raw.data, raw.info.width, raw.info.height);
+              calibration = { ...(calibration || {}), bodySilhouette: sil };
+            }
+          }
+        } catch (e) {
+          console.warn("Could not save data URI person image:", e);
+        }
+      }
     }
 
     if (!image) {

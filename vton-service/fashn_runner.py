@@ -157,11 +157,14 @@ class FashnRunner:
 
         def _notify(stage: str, step: int = 0, total_steps: int = 8, detail: str = "", **kwargs):
             if on_stage_change:
+                clean_kw = dict(kwargs)
+                for k in ("stage", "step", "total_steps", "detail"):
+                    clean_kw.pop(k, None)
                 try:
-                    on_stage_change(stage=stage, step=step, total_steps=total_steps, detail=detail, **kwargs)
+                    on_stage_change(stage=stage, step=step, total_steps=total_steps, detail=detail, **clean_kw)
                 except TypeError:
                     try:
-                        on_stage_change(stage, step, total_steps, detail)
+                        on_stage_change(stage=stage, step=step, total_steps=total_steps, detail=detail)
                     except TypeError:
                         on_stage_change(stage)
 

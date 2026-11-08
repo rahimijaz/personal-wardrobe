@@ -179,33 +179,46 @@ export default function DashboardPage() {
                 className="shrink-0 w-full md:w-64"
               >
                 <div className="relative overflow-hidden rounded-3xl border border-line bg-paper shadow-xl card-shadow">
-                  <div className="relative aspect-[3/4] w-full overflow-hidden img-zoom">
+                  {/* Card Header: Badges outside the photo so the user's face is 100% unobstructed */}
+                  <div className="flex items-center justify-between px-3.5 py-2.5 bg-paper border-b border-line">
+                    <span className="badge-flame text-[10px] py-0.5 px-2">
+                      <span className="h-1.5 w-1.5 rounded-full bg-flame animate-pulse" />
+                      Active Persona
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-bone px-2 py-0.5 text-[10px] font-mono font-medium text-ink-soft border border-line">
+                      {activePerson.calibration?.score ? `${activePerson.calibration.score}% Calibrated` : "DensePose Ready"}
+                    </span>
+                  </div>
+
+                  {/* Natural 2:3 Portrait Frame: Matches the 1024x1536 model ratio edge-to-edge with zero crop */}
+                  <div className="relative aspect-[2/3] w-full overflow-hidden bg-bone-deep">
                     <img
                       src={activePerson.image}
                       alt={activePerson.name}
-                      className="h-full w-full object-cover"
+                      className="h-full w-full object-cover object-top"
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-ink/80 via-ink/10 to-transparent" />
-                    <div className="absolute top-3 left-3">
-                      <span className="badge-flame">
-                        <span className="h-1.5 w-1.5 rounded-full bg-flame animate-pulse" />
-                        Active Persona
-                      </span>
-                    </div>
-                    <div className="absolute bottom-0 inset-x-0 p-4 text-bone">
-                      <p className="font-display text-lg font-bold leading-tight">{activePerson.name}</p>
-                      <p className="text-[11px] text-bone/70 font-mono mt-0.5">Local Reference Model</p>
-                    </div>
                   </div>
-                  <div className="p-3 flex items-center justify-between border-t border-line">
-                    <p className="text-[11px] text-ink-soft">Ready for VTON</p>
-                    <Link
-                      href="/profile"
-                      className="inline-flex items-center gap-1 text-xs font-bold text-flame hover:underline"
-                    >
-                      Change
-                      <ChevronRight className="h-3 w-3" />
-                    </Link>
+
+                  {/* Clean Footer Below Photo - never obscures the model's legs or feet */}
+                  <div className="p-3.5 bg-paper border-t border-line">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-display text-sm font-bold text-ink truncate leading-snug">
+                          {activePerson.name}
+                        </p>
+                        <p className="text-[11px] text-ink-soft font-mono truncate mt-0.5">
+                          {activePerson.calibration?.heightCm ? `${activePerson.calibration.heightCm} cm` : "175 cm"} •{" "}
+                          <span className="capitalize">{activePerson.calibration?.bodySilhouette || "Athletic"}</span>
+                        </p>
+                      </div>
+                      <Link
+                        href="/profile"
+                        className="shrink-0 inline-flex items-center gap-1 rounded-full border border-line bg-bone px-3 py-1 text-xs font-semibold text-ink hover:bg-bone-deep hover:text-flame transition-colors cursor-pointer shadow-2xs"
+                      >
+                        <span>Change</span>
+                        <ChevronRight className="h-3 w-3" />
+                      </Link>
+                    </div>
                   </div>
                 </div>
               </motion.div>
@@ -217,7 +230,7 @@ export default function DashboardPage() {
                 className="shrink-0 w-full md:w-64"
               >
                 <Link href="/profile" className="group block">
-                  <div className="aspect-[3/4] w-full rounded-3xl border-2 border-dashed border-line bg-paper/60 flex flex-col items-center justify-center text-center p-6 transition-all duration-200 group-hover:border-ink group-hover:bg-bone-deep/50">
+                  <div className="aspect-[2/3] w-full rounded-3xl border-2 border-dashed border-line bg-paper/60 flex flex-col items-center justify-center text-center p-6 transition-all duration-200 group-hover:border-ink group-hover:bg-bone-deep/50">
                     <div className="flex h-14 w-14 items-center justify-center rounded-full bg-bone-deep mb-3 group-hover:scale-110 transition-transform">
                       <Plus className="h-7 w-7 text-ink-soft" />
                     </div>

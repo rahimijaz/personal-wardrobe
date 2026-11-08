@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getGarments, createGarment } from "@/server/storage";
-import { paletteFromFile } from "@/server/images";
+import { paletteFromFile, detectCategoryFromFile } from "@/server/images";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -29,11 +29,13 @@ export async function POST(req: Request) {
     let colorHex = "";
     let image = "";
     let diskFilePath = "";
+    let isExplicitCategory = false;
 
     if (contentType.includes("multipart/form-data")) {
       const formData = await req.formData();
       name = (formData.get("name") as string) || "";
       category = (formData.get("category") as GarmentCategory) || "tops";
+      isExplicitCategory = formData.get("isExplicitCategory") === "true";
       photoType = (formData.get("photoType") as GarmentPhotoType) || "flat-lay";
       type = (formData.get("type") as string) || "";
       color = (formData.get("color") as string) || "";
@@ -58,6 +60,7 @@ export async function POST(req: Request) {
       const body = await req.json();
       name = body.name || "";
       category = body.category || "tops";
+      isExplicitCategory = body.isExplicitCategory === true || (Boolean(body.category) && body.category !== "tops");
       photoType = body.photoType || "flat-lay";
       type = body.type || "";
       color = body.color || "";
@@ -91,19 +94,31 @@ export async function POST(req: Request) {
       }
     }
 
-    // Automated Dominant Color & Palette Extraction via Sharp
-    // Runs for all uploads (multipart, cutouts, base64, and files) when color is not explicitly set
+    // Automated Dominant Color & Silhouette Category Extraction via Sharp
+    // Runs for all uploads (multipart, cutouts, base64, and files)
     if (diskFilePath && fs.existsSync(diskFilePath)) {
       try {
         const extracted = await paletteFromFile(diskFilePath);
-        if (!colorHex || colorHex === "#17140e") {
+        if (!colorHex || colorHex === "#17140e" || colorHex === "#1a1815") {
           colorHex = extracted.dominant;
         }
-        if (!color) {
+        if (!color || color === "Jet black") {
           color = extracted.colorName;
         }
       } catch (e) {
         console.warn("Auto color extraction failed, using manual or default values:", e);
+      }
+
+      // If category was not explicitly assigned by the user (or is default "tops"), auto-detect silhouette
+      if (!isExplicitCategory || category === "tops") {
+        try {
+          const detectedCategory = await detectCategoryFromFile(diskFilePath);
+          if (detectedCategory) {
+            category = detectedCategory;
+          }
+        } catch (e) {
+          console.warn("Auto category detection failed:", e);
+        }
       }
     }
 

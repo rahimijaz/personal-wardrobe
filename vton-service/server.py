@@ -106,12 +106,18 @@ def _process_background_removal(pil_img):
     orig_size = pil_img.size
     input_img = pil_img.convert("RGB").resize((1024, 1024), Image.BILINEAR)
     tensor = F.to_tensor(input_img).unsqueeze(0)
-    tensor = F.normalize(tensor, [0.5, 0.5, 0.5], [1.0, 1.0, 1.0])
+    tensor = F.normalize(tensor, [0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
     with torch.no_grad():
         out = model(tensor)
-        pred_tensor = out[0][0]
-        pred = pred_tensor.sigmoid().cpu().squeeze()
+        # Bria RMBG-1.4 produces values in [0, 1] - avoid duplicate sigmoid!
+        pred = out[0][0].cpu().squeeze()
+        ma = torch.max(pred)
+        mi = torch.min(pred)
+        if ma > mi:
+            pred = (pred - mi) / (ma - mi)
+        else:
+            pred = torch.clamp(pred, 0.0, 1.0)
 
     pred_pil = transforms.ToPILImage()(pred).resize(orig_size, Image.BILINEAR)
     result = pil_img.convert("RGBA")
@@ -147,7 +153,11 @@ def _worker_loop():
             job["total_steps"] = overall_total_steps
             job["logs"] = [f"[{time.strftime('%H:%M:%S')}] Job initialized ({num_passes} pass{'es' if num_passes > 1 else ''} • {overall_total_steps} total steps), preparing DirectML environment..."]
 
+        sampling_start_time = None
+        last_step_time = None
+
         def update_stage(new_stage: str, step: int = 0, total_steps: int = overall_total_steps, detail: str = "", **kwargs):
+            nonlocal sampling_start_time, last_step_time
             with _JOBS_LOCK:
                 if job_id in _JOBS:
                     j = _JOBS[job_id]
@@ -155,20 +165,45 @@ def _worker_loop():
                     j["step"] = step
                     j["total_steps"] = total_steps
                     j["detail"] = detail
-                    j["sec_per_it"] = kwargs.get("sec_per_it", 0.0)
-                    j["elapsed_sec"] = kwargs.get("elapsed_sec", 0.0)
-                    j["eta_sec"] = kwargs.get("eta_sec", 0.0)
-                    pct = kwargs.get("percent")
+
+                    now = time.time()
+                    now_str = time.strftime('%H:%M:%S')
+
+                    # Clean kwargs to avoid duplicate keyword argument collisions
+                    clean_kw = dict(kwargs)
+                    pct = clean_kw.pop("percent", None)
                     if pct is None:
                         pct = int(min(100, max(0, (step / max(1, total_steps)) * 100)))
                     j["percent"] = pct
 
-                    now_str = time.strftime('%H:%M:%S')
+                    spi = float(clean_kw.get("sec_per_it", 0.0) or 0.0)
+                    ela = float(clean_kw.get("elapsed_sec", 0.0) or 0.0)
+                    eta = float(clean_kw.get("eta_sec", 0.0) or 0.0)
+
+                    # Dynamic wall-clock tracking & fallback
+                    if new_stage == "generating":
+                        if sampling_start_time is None:
+                            sampling_start_time = now
+                            last_step_time = now
+                        elif step > 0:
+                            if ela <= 0.0:
+                                ela = round(now - sampling_start_time, 1)
+                            if spi <= 0.0:
+                                if last_step_time and (now - last_step_time) > 0.01:
+                                    spi = round(now - last_step_time, 2)
+                                else:
+                                    spi = round(ela / max(1, step), 2)
+                            last_step_time = now
+                            if eta <= 0.0:
+                                rem = max(0, total_steps - step)
+                                eta = round(rem * spi, 1)
+
+                    j["sec_per_it"] = spi
+                    j["elapsed_sec"] = ela
+                    j["eta_sec"] = eta
+
                     logs = j.setdefault("logs", [])
                     if new_stage == "generating" and step > 0:
-                        spi = kwargs.get("sec_per_it", 0.0)
-                        ela = kwargs.get("elapsed_sec", 0.0)
-                        eta = kwargs.get("eta_sec", 0.0)
                         filled = "#" * min(step, total_steps)
                         empty = "-" * max(0, total_steps - step)
                         line = f"[{now_str}] Sampling: {pct:3d}%|{filled}{empty}| {step}/{total_steps} [{int(ela)//60:02d}:{int(ela)%60:02d}<{int(eta)//60:02d}:{int(eta)%60:02d}, {spi:.2f}s/it]"
@@ -204,9 +239,12 @@ def _worker_loop():
                             if _JOBS.get(job_id, {}).get("status") == "cancelled":
                                 raise InterruptedError("Job was cancelled by user.")
                         cur_step = p_offset + step
-                        pct = int(min(100, max(0, (cur_step / overall_total_steps) * 100)))
+                        clean_kw = dict(kwargs)
+                        pct = clean_kw.pop("percent", None)
+                        if pct is None:
+                            pct = int(min(100, max(0, (cur_step / overall_total_steps) * 100)))
                         sub_detail = f"[{p_prefix}] {detail}" if detail else f"[{p_prefix}] Processing {p_cat}..."
-                        update_stage(stage, step=cur_step, total_steps=overall_total_steps, detail=sub_detail, percent=pct, **kwargs)
+                        update_stage(stage, step=cur_step, total_steps=overall_total_steps, detail=sub_detail, percent=pct, **clean_kw)
                     return _cb
 
                 pass_cb = make_pass_callback(pass_prefix, step_offset, g_cat)

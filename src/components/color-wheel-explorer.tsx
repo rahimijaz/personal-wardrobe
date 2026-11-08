@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
 import {
   Sparkles,
@@ -17,6 +17,8 @@ import {
   X,
   Shirt,
   Upload,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import clsx from "clsx";
 import { useWardrobe } from "@/context/wardrobe-context";
@@ -151,6 +153,41 @@ export function ColorWheelExplorer() {
     if (filterCategory === "all") return garments;
     return garments.filter((g) => g.category === filterCategory);
   }, [garments, filterCategory]);
+
+  // Horizontal scroll controls for Step 1 rack
+  const rackRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const updateScrollButtons = useCallback(() => {
+    const el = rackRef.current;
+    if (!el) return;
+    const { scrollLeft, scrollWidth, clientWidth } = el;
+    setCanScrollLeft(scrollLeft > 6);
+    setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 6);
+  }, []);
+
+  useEffect(() => {
+    updateScrollButtons();
+    const t = setTimeout(updateScrollButtons, 120);
+    const handleResize = () => updateScrollButtons();
+    window.addEventListener("resize", handleResize);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [updateScrollButtons, filteredRack]);
+
+  const scrollRack = (direction: "left" | "right") => {
+    const el = rackRef.current;
+    if (!el) return;
+    const scrollAmount = Math.max(260, Math.floor(el.clientWidth * 0.72));
+    el.scrollBy({
+      left: direction === "left" ? -scrollAmount : scrollAmount,
+      behavior: "smooth",
+    });
+    setTimeout(updateScrollButtons, 350);
+  };
 
   const garmentNodes = useMemo(
     () =>
@@ -373,64 +410,139 @@ export function ColorWheelExplorer() {
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
-            {["all", "tops", "bottoms", "one-pieces", "shoes"].map((cat) => (
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+              {["all", "tops", "bottoms", "one-pieces", "shoes"].map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => setFilterCategory(cat)}
+                  className={clsx(
+                    "rounded-full px-3 py-1 text-xs font-semibold capitalize transition-all cursor-pointer whitespace-nowrap",
+                    filterCategory === cat
+                      ? "bg-ink text-bone"
+                      : "bg-bone text-ink-soft hover:bg-bone-deep hover:text-ink"
+                  )}
+                >
+                  {cat === "all" ? "All Pieces" : cat}
+                </button>
+              ))}
+            </div>
+
+            {/* Header Arrow Navigation */}
+            <div className="flex items-center gap-1 pl-1.5 border-l border-line shrink-0">
               <button
-                key={cat}
-                onClick={() => setFilterCategory(cat)}
+                type="button"
+                onClick={() => scrollRack("left")}
+                disabled={!canScrollLeft}
+                aria-label="Scroll rack left"
+                title="Scroll left"
                 className={clsx(
-                  "rounded-full px-3 py-1 text-xs font-semibold capitalize transition-all cursor-pointer whitespace-nowrap",
-                  filterCategory === cat
-                    ? "bg-ink text-bone"
-                    : "bg-bone text-ink-soft hover:bg-bone-deep hover:text-ink"
+                  "flex h-7 w-7 items-center justify-center rounded-full border transition-all",
+                  canScrollLeft
+                    ? "bg-bone text-ink border-line hover:bg-bone-deep hover:text-flame cursor-pointer shadow-2xs"
+                    : "bg-bone/40 text-ink/20 border-line/30 cursor-not-allowed opacity-50"
                 )}
               >
-                {cat === "all" ? "All Pieces" : cat}
+                <ChevronLeft className="h-3.5 w-3.5" />
               </button>
-            ))}
+              <button
+                type="button"
+                onClick={() => scrollRack("right")}
+                disabled={!canScrollRight}
+                aria-label="Scroll rack right"
+                title="Scroll right"
+                className={clsx(
+                  "flex h-7 w-7 items-center justify-center rounded-full border transition-all",
+                  canScrollRight
+                    ? "bg-bone text-ink border-line hover:bg-bone-deep hover:text-flame cursor-pointer shadow-2xs"
+                    : "bg-bone/40 text-ink/20 border-line/30 cursor-not-allowed opacity-50"
+                )}
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-3 overflow-x-auto pb-2 pt-1 no-scrollbar scroll-smooth">
-          {filteredRack.map((g) => {
-            const isSelected = activeAnchor?.garment.id === g.id;
-            const hex = safeHex(g.colorHex, g.name);
-            return (
+        {/* Clothing Rack Carousel with Left/Right Arrows */}
+        <div className="relative group/rack">
+          {/* Floating Left Arrow */}
+          {canScrollLeft && (
+            <>
               <button
-                key={g.id}
-                onClick={() => pickAnchor(g.id)}
-                className={clsx(
-                  "group relative shrink-0 flex flex-col items-center p-2.5 rounded-2xl border text-center transition-all duration-200 cursor-pointer w-28 sm:w-32",
-                  isSelected
-                    ? "border-flame bg-flame/5 ring-2 ring-flame shadow-md"
-                    : "border-line bg-bone hover:border-flame/40 hover:bg-bone-deep"
-                )}
+                type="button"
+                onClick={() => scrollRack("left")}
+                aria-label="Scroll clothes left"
+                title="Scroll left"
+                className="absolute left-1 sm:left-2 top-1/2 -translate-y-1/2 z-20 flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-full bg-paper/95 backdrop-blur-md border border-line shadow-lg text-ink hover:bg-bone hover:scale-105 active:scale-95 transition-all cursor-pointer"
               >
-                <div className="relative h-20 w-20 rounded-xl overflow-hidden bg-bone-deep border border-line mb-2 flex items-center justify-center">
-                  <img
-                    src={g.image}
-                    alt={g.name}
-                    className="h-full w-full object-cover group-hover:scale-105 transition-transform"
-                  />
-                  <div
-                    className="absolute bottom-1 right-1 h-3.5 w-3.5 rounded-full border border-black/20"
-                    style={{ backgroundColor: hex }}
-                  />
-                  {isSelected && (
-                    <div className="absolute top-1 left-1 bg-flame text-white rounded-full p-0.5 shadow-xs">
-                      <Check className="h-3 w-3 stroke-[3]" />
-                    </div>
-                  )}
-                </div>
-                <span className="text-xs font-bold text-ink truncate w-full text-center leading-tight">
-                  {g.name}
-                </span>
-                <span className="text-[10px] text-ink-soft capitalize mt-0.5 truncate w-full">
-                  {g.color || nearestColorName(hex)}
-                </span>
+                <ChevronLeft className="h-4 w-4 sm:h-5 sm:w-5" />
               </button>
-            );
-          })}
+              <div className="pointer-events-none absolute left-0 top-0 bottom-2 w-14 bg-gradient-to-r from-paper via-paper/85 to-transparent z-10 rounded-l-2xl" />
+            </>
+          )}
+
+          <div
+            ref={rackRef}
+            onScroll={updateScrollButtons}
+            className="flex items-center gap-3 overflow-x-auto pb-2 pt-1 no-scrollbar scroll-smooth"
+          >
+            {filteredRack.map((g) => {
+              const isSelected = activeAnchor?.garment.id === g.id;
+              const hex = safeHex(g.colorHex, g.name);
+              return (
+                <button
+                  key={g.id}
+                  onClick={() => pickAnchor(g.id)}
+                  className={clsx(
+                    "group relative shrink-0 flex flex-col items-center p-2.5 rounded-2xl border text-center transition-all duration-200 cursor-pointer w-28 sm:w-32",
+                    isSelected
+                      ? "border-flame bg-flame/5 ring-2 ring-flame shadow-md"
+                      : "border-line bg-bone hover:border-flame/40 hover:bg-bone-deep"
+                  )}
+                >
+                  <div className="relative h-20 w-20 rounded-xl overflow-hidden bg-bone-deep border border-line mb-2 flex items-center justify-center">
+                    <img
+                      src={g.image}
+                      alt={g.name}
+                      className="h-full w-full object-cover group-hover:scale-105 transition-transform"
+                    />
+                    <div
+                      className="absolute bottom-1 right-1 h-3.5 w-3.5 rounded-full border border-black/20"
+                      style={{ backgroundColor: hex }}
+                    />
+                    {isSelected && (
+                      <div className="absolute top-1 left-1 bg-flame text-white rounded-full p-0.5 shadow-xs">
+                        <Check className="h-3 w-3 stroke-[3]" />
+                      </div>
+                    )}
+                  </div>
+                  <span className="text-xs font-bold text-ink truncate w-full text-center leading-tight">
+                    {g.name}
+                  </span>
+                  <span className="text-[10px] text-ink-soft capitalize mt-0.5 truncate w-full">
+                    {g.color || nearestColorName(hex)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Floating Right Arrow */}
+          {canScrollRight && (
+            <>
+              <div className="pointer-events-none absolute right-0 top-0 bottom-2 w-14 bg-gradient-to-l from-paper via-paper/85 to-transparent z-10 rounded-r-2xl" />
+              <button
+                type="button"
+                onClick={() => scrollRack("right")}
+                aria-label="Scroll clothes right"
+                title="Scroll right"
+                className="absolute right-1 sm:right-2 top-1/2 -translate-y-1/2 z-20 flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-full bg-paper/95 backdrop-blur-md border border-line shadow-lg text-ink hover:bg-bone hover:scale-105 active:scale-95 transition-all cursor-pointer"
+              >
+                <ChevronRight className="h-4 w-4 sm:h-5 sm:w-5" />
+              </button>
+            </>
+          )}
         </div>
       </div>
 

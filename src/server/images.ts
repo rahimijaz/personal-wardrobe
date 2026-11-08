@@ -3,8 +3,9 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
 import { extractPaletteFromPixels } from "../lib/palette";
+import { detectCategoryFromPixels } from "../lib/garment-utils";
 import { nearestColorName } from "../lib/colors";
-import type { PersonaCalibration } from "@/lib/types";
+import type { PersonaCalibration, GarmentCategory } from "@/lib/types";
 
 export interface ProcessedUpload {
   publicPath: string;
@@ -71,6 +72,20 @@ export async function paletteFromFile(absPath: string): Promise<{
     colorName: nearestColorName(extracted.dominant),
     palette: extracted.palette,
   };
+}
+
+export async function detectCategoryFromFile(absPath: string): Promise<GarmentCategory> {
+  try {
+    const raw = await sharp(absPath)
+      .rotate()
+      .resize(96, 96, { fit: "fill" })
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    return detectCategoryFromPixels(raw.data, raw.info.width, raw.info.height);
+  } catch (e) {
+    return "tops";
+  }
 }
 
 export async function removeUpload(publicPath: string): Promise<void> {

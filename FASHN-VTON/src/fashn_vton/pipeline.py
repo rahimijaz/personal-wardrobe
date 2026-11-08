@@ -398,14 +398,16 @@ class TryOnPipeline:
                 percent=0,
             )
 
-        def _on_diffusion_step(**kwargs):
+        def _on_diffusion_step(*args, **kwargs):
             if callback is not None:
-                st = kwargs.get("step", 0)
-                tot = kwargs.get("total_steps", num_timesteps)
+                st = kwargs.get("step") if "step" in kwargs else (args[0] if len(args) > 0 else 0)
+                tot = kwargs.get("total_steps") if "total_steps" in kwargs else (args[1] if len(args) > 1 else num_timesteps)
                 spi = kwargs.get("sec_per_it", 0.0)
                 ela = kwargs.get("elapsed_sec", 0.0)
                 eta = kwargs.get("eta_sec", 0.0)
-                pct = kwargs.get("percent", 0)
+                pct = kwargs.get("percent")
+                if pct is None:
+                    pct = int((st / max(1, tot)) * 100)
                 detail = f"Timestep {st}/{tot} [{pct}%] • {spi:.1f}s/it • ETA: {int(eta)//60:02d}:{int(eta)%60:02d}"
                 callback(
                     stage="generating",

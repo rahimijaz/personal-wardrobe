@@ -41,6 +41,7 @@ import type {
   PersonaFraming,
   PersonaLighting,
 } from "@/lib/types";
+import { detectBodySilhouetteFromImageSrc } from "@/lib/persona-utils";
 
 function ProfilePageContent() {
   const searchParams = useSearchParams();
@@ -63,6 +64,8 @@ function ProfilePageContent() {
   const [xOffset, setXOffset] = useState<number>(0);
   const [yOffset, setYOffset] = useState<number>(0);
   const [showGuidelines, setShowGuidelines] = useState<boolean>(true);
+  const [fitMode, setFitMode] = useState<"contain" | "cover">("contain");
+  const [isSilhouetteAutoDetected, setIsSilhouetteAutoDetected] = useState<boolean>(false);
 
   // Calibration physical parameters
   const [heightCm, setHeightCm] = useState<number>(175);
@@ -156,6 +159,7 @@ function ProfilePageContent() {
     setZoom(1.0);
     setXOffset(0);
     setYOffset(0);
+    setFitMode("contain");
   };
 
   const handleSaveCalibration = async () => {
@@ -204,10 +208,30 @@ function ProfilePageContent() {
 
     setFileToUpload(file);
     const reader = new FileReader();
-    reader.onload = () => {
-      setPreviewImage(reader.result as string);
+    reader.onload = async () => {
+      const dataUrl = reader.result as string;
+      setPreviewImage(dataUrl);
+      setFitMode("contain");
       if (!nameInput) {
-        setNameInput("Custom Persona");
+        const cleanName = file.name
+          .replace(/\.[^/.]+$/, "")
+          .replace(/[-_+.]+/g, " ")
+          .trim();
+        setNameInput(
+          cleanName
+            ? cleanName.charAt(0).toUpperCase() + cleanName.slice(1)
+            : "Custom Persona"
+        );
+      }
+      // Auto-detect body silhouette from uploaded person photo
+      try {
+        const detected = await detectBodySilhouetteFromImageSrc(dataUrl);
+        if (detected) {
+          setBodySilhouette(detected);
+          setIsSilhouetteAutoDetected(true);
+        }
+      } catch (err) {
+        console.warn("Auto silhouette detection fallback:", err);
       }
     };
     reader.readAsDataURL(file);
@@ -277,6 +301,7 @@ function ProfilePageContent() {
       setPreviewImage(null);
       setFileToUpload(null);
       setNameInput("");
+      setIsSilhouetteAutoDetected(false);
       setActiveTab("calibrate");
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
@@ -457,11 +482,11 @@ function ProfilePageContent() {
                     : "border-line bg-bone hover:border-ink/40"
                 )}
               >
-                <div className="relative aspect-[3/4] w-full overflow-hidden rounded-xl bg-bone-deep">
+                <div className="relative aspect-[2/3] w-full overflow-hidden rounded-xl bg-bone-deep">
                   <img
                     src={p.image}
                     alt={p.name}
-                    className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
+                    className="h-full w-full object-cover object-top transition-transform duration-200 group-hover:scale-105"
                   />
                   {p.isDefault && (
                     <div className="absolute top-1.5 left-1.5 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[9px] font-bold text-bone">
@@ -497,7 +522,7 @@ function ProfilePageContent() {
                     Calibration Viewport
                   </span>
                   <span className="rounded-md bg-flame/10 px-2 py-0.5 text-[10px] font-bold text-flame">
-                    3:4 Aspect Ratio
+                    2:3 Portrait Studio Frame
                   </span>
                 </div>
 
@@ -505,7 +530,7 @@ function ProfilePageContent() {
                   <button
                     onClick={() => setShowGuidelines(!showGuidelines)}
                     className={clsx(
-                      "inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1 text-[11px] font-semibold transition-colors",
+                      "inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1 text-[11px] font-semibold transition-colors cursor-pointer",
                       showGuidelines
                         ? "border-flame/40 bg-flame/10 text-flame"
                         : "border-line bg-bone text-ink-soft hover:text-ink"
@@ -518,7 +543,7 @@ function ProfilePageContent() {
 
                   <button
                     onClick={handleResetFraming}
-                    className="rounded-xl border border-line bg-bone p-1.5 text-ink-soft hover:text-ink transition-colors"
+                    className="rounded-xl border border-line bg-bone p-1.5 text-ink-soft hover:text-ink transition-colors cursor-pointer"
                     title="Reset framing & zoom"
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
@@ -526,10 +551,10 @@ function ProfilePageContent() {
                 </div>
               </div>
 
-              {/* Viewport Canvas with Guidelines Overlay */}
-              <div className="relative aspect-[3/4] w-full overflow-hidden rounded-2xl border border-line bg-bone-deep shadow-inner select-none">
+              {/* Viewport Canvas with Guidelines Overlay: Natural 2:3 Edge-to-Edge Photograph */}
+              <div className="relative aspect-[2/3] w-full max-w-sm sm:max-w-md mx-auto overflow-hidden rounded-2xl border border-line bg-bone-deep shadow-inner select-none flex items-center justify-center">
                 {targetedPerson ? (
-                  <div className="absolute inset-0 overflow-hidden flex items-center justify-center">
+                  <div className="relative h-full w-full overflow-hidden flex items-center justify-center">
                     <img
                       src={targetedPerson.image}
                       alt={targetedPerson.name}
@@ -538,7 +563,7 @@ function ProfilePageContent() {
                         transformOrigin: "center center",
                         transition: "transform 0.15s ease-out",
                       }}
-                      className="h-full w-full object-cover pointer-events-none"
+                      className="h-full w-full object-cover object-top pointer-events-none"
                     />
                   </div>
                 ) : (
@@ -754,9 +779,31 @@ function ProfilePageContent() {
 
               {/* 2. Body Silhouette */}
               <div>
-                <label className="block text-xs font-semibold text-ink mb-2">
-                  Body Frame & Silhouette
-                </label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-semibold text-ink">
+                    Body Frame & Silhouette
+                  </label>
+                  {targetedPerson && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const detected = await detectBodySilhouetteFromImageSrc(targetedPerson.image);
+                          if (detected) {
+                            setBodySilhouette(detected);
+                            setIsSilhouetteAutoDetected(true);
+                          }
+                        } catch (e) {
+                          console.warn("Auto silhouette detection fallback:", e);
+                        }
+                      }}
+                      className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-mono font-semibold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20 transition-colors cursor-pointer"
+                    >
+                      <Sparkles className="h-3 w-3" />
+                      <span>Auto-detect</span>
+                    </button>
+                  )}
+                </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {SILHOUETTES.map((s) => {
                     const isSelected = bodySilhouette === s.id;
@@ -764,15 +811,25 @@ function ProfilePageContent() {
                       <button
                         key={s.id}
                         type="button"
-                        onClick={() => setBodySilhouette(s.id)}
+                        onClick={() => {
+                          setBodySilhouette(s.id);
+                          setIsSilhouetteAutoDetected(false);
+                        }}
                         className={clsx(
-                          "flex flex-col text-left p-3 rounded-2xl border transition-all",
+                          "flex flex-col text-left p-3 rounded-2xl border transition-all cursor-pointer",
                           isSelected
-                            ? "border-ink bg-bone-deep ring-1 ring-ink text-ink"
+                            ? "border-ink bg-bone-deep ring-1 ring-ink text-ink shadow-2xs"
                             : "border-line bg-bone hover:border-ink/40 text-ink-soft"
                         )}
                       >
-                        <span className="text-xs font-bold text-ink">{s.label}</span>
+                        <div className="flex items-center justify-between w-full">
+                          <span className="text-xs font-bold text-ink">{s.label}</span>
+                          {isSelected && isSilhouetteAutoDetected && (
+                            <span className="text-[9px] font-mono bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.2 rounded font-bold">
+                              AI Detected
+                            </span>
+                          )}
+                        </div>
                         <span className="text-[10px] text-ink-soft mt-0.5 leading-tight">
                           {s.desc}
                         </span>
@@ -939,8 +996,9 @@ function ProfilePageContent() {
               </label>
 
               {previewImage ? (
-                <div className="space-y-3">
-                  <div className="relative aspect-[3/4] max-h-96 w-full mx-auto overflow-hidden rounded-2xl border border-line bg-bone-deep">
+                <div className="space-y-4">
+                  {/* Photo Preview Canvas: Natural 2:3 Edge-to-Edge Photograph */}
+                  <div className="relative aspect-[2/3] max-w-sm sm:max-w-md w-full mx-auto overflow-hidden rounded-2xl border border-line bg-bone-deep shadow-inner flex items-center justify-center">
                     <img
                       src={previewImage}
                       alt="Upload Preview"
@@ -948,40 +1006,93 @@ function ProfilePageContent() {
                         transform: `scale(${zoom}) translate(${xOffset}%, ${yOffset}%)`,
                         transformOrigin: "center center",
                       }}
-                      className="h-full w-full object-cover"
+                      className="h-full w-full object-cover object-top pointer-events-none transition-transform duration-150"
                     />
 
+                    {/* Subtle top gradient for clean badge contrast */}
+                    <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-transparent pointer-events-none" />
+
+                    {/* Top Floating Control Bar */}
+                    <div className="absolute top-3 inset-x-3 z-20 flex items-center justify-between">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-paper/90 backdrop-blur-md border border-line px-2.5 py-1 text-[11px] font-mono font-bold text-ink shadow-2xs">
+                        2:3 Portrait Preview
+                      </span>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setShowGuidelines(!showGuidelines)}
+                          className={clsx(
+                            "px-2.5 py-1 text-[11px] font-semibold rounded-xl border backdrop-blur-md transition-colors cursor-pointer",
+                            showGuidelines
+                              ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-700 dark:text-emerald-300"
+                              : "bg-paper/90 border-line text-ink-soft hover:text-ink"
+                          )}
+                        >
+                          {showGuidelines ? "Guides ON" : "Guides OFF"}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPreviewImage(null);
+                            setFileToUpload(null);
+                            setIsSilhouetteAutoDetected(false);
+                          }}
+                          className="rounded-full bg-paper/90 backdrop-blur-md border border-line p-1.5 text-ink-soft hover:text-flame hover:bg-bone transition-colors shadow-xs cursor-pointer"
+                          title="Clear photo"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Anatomical Alignment Guidelines */}
                     {showGuidelines && (
-                      <div className="absolute inset-0 pointer-events-none">
-                        <div className="absolute inset-4 rounded-xl border border-dashed border-emerald-400/40" />
-                        <div className="absolute top-[26%] inset-x-4 border-t border-dashed border-sky-400/60" />
-                        <div className="absolute top-[45%] inset-x-4 border-t border-dashed border-emerald-400/60" />
+                      <div className="absolute inset-0 pointer-events-none z-15">
+                        <div className="absolute inset-4 rounded-xl border border-dashed border-emerald-400/35" />
+                        <div className="absolute top-[18%] inset-x-4 border-t border-dashed border-sky-400/50">
+                          <span className="text-[9px] font-mono text-sky-600 dark:text-sky-300 px-1 bg-paper/85 rounded ml-2">Head / Eyes</span>
+                        </div>
+                        <div className="absolute top-[26%] inset-x-4 border-t border-dashed border-amber-400/50">
+                          <span className="text-[9px] font-mono text-amber-600 dark:text-amber-300 px-1 bg-paper/85 rounded ml-2">Shoulders</span>
+                        </div>
+                        <div className="absolute top-[48%] inset-x-4 border-t border-dashed border-emerald-400/50">
+                          <span className="text-[9px] font-mono text-emerald-700 dark:text-emerald-300 px-1 bg-paper/85 rounded ml-2">Waist / Hips</span>
+                        </div>
+                        <div className="absolute top-[88%] inset-x-4 border-t border-dashed border-purple-400/50">
+                          <span className="text-[9px] font-mono text-purple-700 dark:text-purple-300 px-1 bg-paper/85 rounded ml-2">Ankles / Feet</span>
+                        </div>
                       </div>
                     )}
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPreviewImage(null);
-                        setFileToUpload(null);
-                      }}
-                      className="absolute top-2.5 right-2.5 rounded-full bg-ink/80 p-1.5 text-bone hover:bg-flame transition-colors"
-                      title="Clear photo"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
                   </div>
 
                   {/* Calibration Sliders for Preview */}
-                  <div className="bg-bone rounded-xl p-3 border border-line space-y-2">
+                  <div className="bg-bone rounded-2xl p-4 border border-line space-y-3">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-ink">Fine-tune Framing Zoom</span>
-                      <span className="font-mono text-ink">{zoom.toFixed(2)}x</span>
+                      <span className="font-semibold text-ink flex items-center gap-1.5">
+                        <Maximize2 className="h-3.5 w-3.5 text-flame" />
+                        <span>Fine-tune Framing Zoom</span>
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-ink text-xs font-semibold">{zoom.toFixed(2)}x</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setZoom(1.0);
+                            setXOffset(0);
+                            setYOffset(0);
+                          }}
+                          className="text-[10px] text-ink-soft hover:text-flame transition-colors font-mono cursor-pointer"
+                        >
+                          Reset
+                        </button>
+                      </div>
                     </div>
                     <input
                       type="range"
-                      min="0.8"
-                      max="1.5"
+                      min="0.6"
+                      max="1.8"
                       step="0.02"
                       value={zoom}
                       onChange={(e) => setZoom(parseFloat(e.target.value))}
@@ -1018,11 +1129,19 @@ function ProfilePageContent() {
                       <button
                         key={preset.name}
                         type="button"
-                        onClick={() => {
+                        onClick={async () => {
                           setPreviewImage(preset.image);
                           setNameInput(preset.name);
+                          setFitMode("contain");
+                          try {
+                            const detected = await detectBodySilhouetteFromImageSrc(preset.image);
+                            if (detected) {
+                              setBodySilhouette(detected);
+                              setIsSilhouetteAutoDetected(true);
+                            }
+                          } catch {}
                         }}
-                        className="rounded-full border border-line bg-bone px-3 py-1 text-[11px] font-medium text-ink hover:bg-bone-deep transition-colors"
+                        className="rounded-full border border-line bg-bone px-3 py-1 text-[11px] font-medium text-ink hover:bg-bone-deep transition-colors cursor-pointer"
                       >
                         + {preset.name}
                       </button>
@@ -1049,13 +1168,23 @@ function ProfilePageContent() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-ink mb-1">
-                  Body Silhouette
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-ink">
+                    Body Silhouette
+                  </label>
+                  {isSilhouetteAutoDetected && (
+                    <span className="text-[9px] font-mono text-emerald-700 dark:text-emerald-300 bg-emerald-500/15 px-1.5 py-0.5 rounded font-bold">
+                      AI Auto-Selected
+                    </span>
+                  )}
+                </div>
                 <select
                   value={bodySilhouette}
-                  onChange={(e) => setBodySilhouette(e.target.value as BodySilhouette)}
-                  className="w-full rounded-xl border border-line bg-bone px-3 py-2 text-xs text-ink focus:border-ink focus:outline-none"
+                  onChange={(e) => {
+                    setBodySilhouette(e.target.value as BodySilhouette);
+                    setIsSilhouetteAutoDetected(false);
+                  }}
+                  className="w-full rounded-xl border border-line bg-bone px-3 py-2 text-xs text-ink focus:border-ink focus:outline-none cursor-pointer"
                 >
                   {SILHOUETTES.map((s) => (
                     <option key={s.id} value={s.id}>
