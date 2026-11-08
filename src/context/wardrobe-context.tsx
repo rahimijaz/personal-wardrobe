@@ -48,13 +48,15 @@ interface WardrobeContextType {
   refreshPersons: () => Promise<void>;
   refreshOutfits: () => Promise<void>;
   setActivePersonById: (id: string) => Promise<void>;
+  updatePersonProfile: (id: string, updates: Partial<Person>) => Promise<Person>;
   startTryOn: (
     personId: string,
-    garmentId: string,
-    category: VtonCategory,
-    garmentPhotoType: GarmentPhotoType,
+    garmentIdOrIds: string | string[],
+    category?: VtonCategory,
+    garmentPhotoType?: GarmentPhotoType,
     customParams?: Partial<InferenceParameters>
   ) => Promise<VtonJob>;
+  cancelActiveJob: () => Promise<void>;
   clearActiveJob: () => void;
   toggleFavoriteGarment: (id: string) => Promise<void>;
   deleteGarment: (id: string) => Promise<boolean>;
@@ -265,22 +267,43 @@ export function WardrobeProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const updatePersonProfile = async (id: string, updates: Partial<Person>): Promise<Person> => {
+    const res = await fetch(`/api/persons/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || "Failed to update person profile");
+    }
+    const data = await res.json();
+    const updated = data.person as Person;
+    setPersons((prev) => prev.map((p) => (p.id === id ? updated : p)));
+    setActivePerson((prev) => (prev?.id === id ? updated : prev));
+    return updated;
+  };
+
   const startTryOn = async (
     personId: string,
-    garmentId: string,
-    category: VtonCategory,
-    garmentPhotoType: GarmentPhotoType,
+    garmentIdOrIds: string | string[],
+    category?: VtonCategory,
+    garmentPhotoType?: GarmentPhotoType,
     customParams?: Partial<InferenceParameters>
   ): Promise<VtonJob> => {
     const activeParams = { ...inferenceParams, ...customParams };
+    const garmentIds = Array.isArray(garmentIdOrIds)
+      ? garmentIdOrIds
+      : [garmentIdOrIds];
+
     const res = await fetch("/api/try-on/jobs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         personId,
-        garmentId,
-        category,
-        garmentPhotoType,
+        garmentIds,
+        category: category || "tops",
+        garmentPhotoType: garmentPhotoType || "flat-lay",
         params: activeParams,
       }),
     });
@@ -297,6 +320,25 @@ export function WardrobeProvider({ children }: { children: React.ReactNode }) {
 
   const clearActiveJob = () => {
     setActiveJob(null);
+  };
+
+  const cancelActiveJob = async () => {
+    if (!activeJob) return;
+    try {
+      await fetch(`/api/try-on/jobs/${activeJob.id}`, { method: "DELETE" });
+      setActiveJob((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: "failed",
+              stage: "cancelled" as any,
+              error: "Generation was cancelled by user.",
+            }
+          : null
+      );
+    } catch (e) {
+      console.error("Failed to cancel active job:", e);
+    }
   };
 
   const toggleFavoriteGarment = async (id: string) => {
@@ -397,7 +439,9 @@ export function WardrobeProvider({ children }: { children: React.ReactNode }) {
         refreshPersons,
         refreshOutfits,
         setActivePersonById,
+        updatePersonProfile,
         startTryOn,
+        cancelActiveJob,
         clearActiveJob,
         toggleFavoriteGarment,
         deleteGarment,

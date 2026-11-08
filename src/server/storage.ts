@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import type {
   Garment,
   Person,
+  PersonaCalibration,
   Outfit,
   VtonJob,
   GarmentCategory,
@@ -20,6 +21,34 @@ interface WardrobeData {
 const DATA_DIR = path.join(process.cwd(), "data");
 const DATA_FILE = path.join(DATA_DIR, "wardrobe.json");
 
+const DEFAULT_ELENA_CALIBRATION: PersonaCalibration = {
+  heightCm: 175,
+  bodySilhouette: "athletic",
+  posture: "standing-frontal",
+  framing: "full-body",
+  lighting: "studio-neutral",
+  zoom: 1.0,
+  yOffset: 0,
+  xOffset: 0,
+  score: 98,
+  calibratedAt: new Date(Date.now() - 86400000 * 7).toISOString(),
+  notes: "Studio lighting, optimal DensePose alignment",
+};
+
+const DEFAULT_SOFIA_CALIBRATION: PersonaCalibration = {
+  heightCm: 172,
+  bodySilhouette: "regular",
+  posture: "standing-quarter",
+  framing: "three-quarters",
+  lighting: "studio-neutral",
+  zoom: 1.0,
+  yOffset: 0,
+  xOffset: 0,
+  score: 95,
+  calibratedAt: new Date(Date.now() - 86400000 * 3).toISOString(),
+  notes: "Natural studio light, 3/4 turn pose",
+};
+
 const INITIAL_DATA: WardrobeData = {
   persons: [
     {
@@ -28,6 +57,7 @@ const INITIAL_DATA: WardrobeData = {
       image: "/samples/model.png",
       isDefault: true,
       createdAt: new Date(Date.now() - 86400000 * 7).toISOString(),
+      calibration: DEFAULT_ELENA_CALIBRATION,
     },
     {
       id: "person-sofia",
@@ -35,6 +65,7 @@ const INITIAL_DATA: WardrobeData = {
       image: "/samples/model3.png",
       isDefault: false,
       createdAt: new Date(Date.now() - 86400000 * 3).toISOString(),
+      calibration: DEFAULT_SOFIA_CALIBRATION,
     },
   ],
   garments: [
@@ -136,7 +167,37 @@ function readData(): WardrobeData {
       return INITIAL_DATA;
     }
     const raw = fs.readFileSync(DATA_FILE, "utf-8");
-    return JSON.parse(raw) as WardrobeData;
+    const parsed = JSON.parse(raw) as WardrobeData;
+    let mutated = false;
+    for (const p of parsed.persons) {
+      if (!p.calibration) {
+        if (p.id === "person-elena") {
+          p.calibration = DEFAULT_ELENA_CALIBRATION;
+        } else if (p.id === "person-sofia") {
+          p.calibration = DEFAULT_SOFIA_CALIBRATION;
+        } else {
+          p.calibration = {
+            heightCm: 172,
+            bodySilhouette: "regular",
+            posture: "standing-frontal",
+            framing: "full-body",
+            lighting: "studio-neutral",
+            zoom: 1.0,
+            yOffset: 0,
+            xOffset: 0,
+            score: 92,
+            calibratedAt: new Date().toISOString(),
+          };
+        }
+        mutated = true;
+      }
+    }
+    if (mutated) {
+      try {
+        writeData(parsed);
+      } catch {}
+    }
+    return parsed;
   } catch (err) {
     console.error("Error reading wardrobe data, using fallback:", err);
     return INITIAL_DATA;
@@ -206,10 +267,27 @@ export function createGarment(
   item: Omit<Garment, "id" | "createdAt" | "favorite"> & { favorite?: boolean }
 ): Garment {
   const data = readData();
+  const id = `garment-${crypto.randomUUID()}`;
+  let image = item.image;
+
+  if (image && image.startsWith("data:")) {
+    try {
+      const uploadsDir = path.join(process.cwd(), "public", "uploads");
+      fs.mkdirSync(uploadsDir, { recursive: true });
+      const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
+      const imgBuffer = Buffer.from(base64Data, "base64");
+      const imgPath = path.join(uploadsDir, `${id}.png`);
+      fs.writeFileSync(imgPath, imgBuffer);
+      image = `/uploads/${id}.png`;
+    } catch (e) {
+      console.warn("Could not write garment data URI to disk:", e);
+    }
+  }
+
   const newGarment: Garment = {
-    id: `garment-${crypto.randomUUID()}`,
+    id,
     name: item.name.trim(),
-    image: item.image,
+    image,
     category: item.category as GarmentCategory,
     type: item.type?.trim() || undefined,
     color: item.color?.trim() || undefined,
@@ -272,17 +350,53 @@ export function getDefaultPerson(): Person {
   return def || data.persons[0];
 }
 
-export function createPerson(name: string, image: string, isDefault = false): Person {
+export function createPerson(
+  name: string,
+  rawImage: string,
+  isDefault = false,
+  calibration?: PersonaCalibration
+): Person {
   const data = readData();
+  const id = `person-${crypto.randomUUID()}`;
+  let image = rawImage;
+
+  if (image && image.startsWith("data:")) {
+    try {
+      const uploadsDir = path.join(process.cwd(), "public", "uploads");
+      fs.mkdirSync(uploadsDir, { recursive: true });
+      const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
+      const imgBuffer = Buffer.from(base64Data, "base64");
+      const imgPath = path.join(uploadsDir, `${id}.png`);
+      fs.writeFileSync(imgPath, imgBuffer);
+      image = `/uploads/${id}.png`;
+    } catch (e) {
+      console.warn("Could not write person data URI to disk:", e);
+    }
+  }
+
   if (isDefault) {
     for (const p of data.persons) p.isDefault = false;
   }
+  const defaultCal: PersonaCalibration = {
+    heightCm: 172,
+    bodySilhouette: "regular",
+    posture: "standing-frontal",
+    framing: "full-body",
+    lighting: "studio-neutral",
+    zoom: 1.0,
+    yOffset: 0,
+    xOffset: 0,
+    score: 94,
+    calibratedAt: new Date().toISOString(),
+  };
+
   const person: Person = {
-    id: `person-${crypto.randomUUID()}`,
+    id,
     name: name.trim(),
     image,
     isDefault,
     createdAt: new Date().toISOString(),
+    calibration: calibration ? { ...defaultCal, ...calibration } : defaultCal,
   };
   data.persons.unshift(person);
   writeData(data);
@@ -310,7 +424,17 @@ export function updatePerson(id: string, updates: Partial<Person>): Person | nul
   const data = readData();
   const index = data.persons.findIndex((p) => p.id === id);
   if (index === -1) return null;
-  data.persons[index] = { ...data.persons[index], ...updates };
+  
+  const existing = data.persons[index];
+  const mergedCalibration = updates.calibration
+    ? { ...existing.calibration, ...updates.calibration, calibratedAt: new Date().toISOString() }
+    : existing.calibration;
+
+  data.persons[index] = {
+    ...existing,
+    ...updates,
+    calibration: mergedCalibration,
+  };
   writeData(data);
   return data.persons[index];
 }
@@ -361,12 +485,25 @@ export function createOutfit(outfit: {
   favorite?: boolean;
 }): Outfit {
   const data = readData();
+  // If resultImage is a data URI, write it to a file and store the path
+  let resultImage = outfit.resultImage;
+  if (resultImage.startsWith("data:")) {
+    const outfitId = `outfit-${crypto.randomUUID()}`;
+    const tryonDir = path.join(process.cwd(), "public", "uploads", "tryon");
+    fs.mkdirSync(tryonDir, { recursive: true });
+    const base64Data = resultImage.replace(/^data:image\/\w+;base64,/, "");
+    const imgBuffer = Buffer.from(base64Data, "base64");
+    const imgPath = path.join(tryonDir, `${outfitId}.png`);
+    fs.writeFileSync(imgPath, imgBuffer);
+    resultImage = `/uploads/tryon/${outfitId}.png`;
+  }
+
   const newOutfit: Outfit = {
     id: `outfit-${crypto.randomUUID()}`,
     name: outfit.name?.trim() || `Look ${new Date().toLocaleDateString()}`,
     personId: outfit.personId,
     garmentIds: outfit.garmentIds,
-    resultImage: outfit.resultImage,
+    resultImage,
     category: outfit.category || "tops",
     favorite: Boolean(outfit.favorite),
     createdAt: new Date().toISOString(),
@@ -428,6 +565,22 @@ export function getVtonJobById(id: string): VtonJob | null {
 
 export function saveVtonJob(job: VtonJob): VtonJob {
   const data = readData();
+
+  // If result is a base64 data URI, write it to public/uploads/tryon/ and store the path
+  if (job.result && job.result.startsWith("data:")) {
+    try {
+      const tryonDir = path.join(process.cwd(), "public", "uploads", "tryon");
+      fs.mkdirSync(tryonDir, { recursive: true });
+      const base64Data = job.result.replace(/^data:image\/\w+;base64,/, "");
+      const imgBuffer = Buffer.from(base64Data, "base64");
+      const imgPath = path.join(tryonDir, `${job.id}.png`);
+      fs.writeFileSync(imgPath, imgBuffer);
+      job.result = `/uploads/tryon/${job.id}.png`;
+    } catch (e) {
+      console.warn("Could not write job result data URI to disk:", e);
+    }
+  }
+
   const index = data.jobs.findIndex((j) => j.id === job.id);
   if (index >= 0) {
     data.jobs[index] = job;

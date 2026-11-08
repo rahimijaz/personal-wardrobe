@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getGarments, createGarment } from "@/server/storage";
+import { paletteFromFile } from "@/server/images";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -25,8 +26,9 @@ export async function POST(req: Request) {
     let photoType: GarmentPhotoType = "flat-lay";
     let type = "";
     let color = "";
-    let colorHex = "#17140e";
+    let colorHex = "";
     let image = "";
+    let diskFilePath = "";
 
     if (contentType.includes("multipart/form-data")) {
       const formData = await req.formData();
@@ -35,7 +37,7 @@ export async function POST(req: Request) {
       photoType = (formData.get("photoType") as GarmentPhotoType) || "flat-lay";
       type = (formData.get("type") as string) || "";
       color = (formData.get("color") as string) || "";
-      colorHex = (formData.get("colorHex") as string) || "#17140e";
+      colorHex = (formData.get("colorHex") as string) || "";
 
       const file = formData.get("image");
       if (file instanceof File) {
@@ -46,8 +48,8 @@ export async function POST(req: Request) {
         }
         const ext = file.name.split(".").pop() || "jpg";
         const fileName = `garment-${crypto.randomUUID()}.${ext}`;
-        const filePath = path.join(uploadsDir, fileName);
-        fs.writeFileSync(filePath, buffer);
+        diskFilePath = path.join(uploadsDir, fileName);
+        fs.writeFileSync(diskFilePath, buffer);
         image = `/uploads/${fileName}`;
       } else if (typeof formData.get("image") === "string") {
         image = formData.get("image") as string;
@@ -59,8 +61,55 @@ export async function POST(req: Request) {
       photoType = body.photoType || "flat-lay";
       type = body.type || "";
       color = body.color || "";
-      colorHex = body.colorHex || "#17140e";
+      colorHex = body.colorHex || "";
       image = body.image || "";
+    }
+
+    // If image is a data URI, write it to public/uploads as a file
+    if (image.startsWith("data:")) {
+      try {
+        const matches = image.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+        if (matches) {
+          const ext = matches[1] === "jpeg" ? "jpg" : matches[1];
+          const buffer = Buffer.from(matches[2], "base64");
+          const uploadsDir = path.join(process.cwd(), "public", "uploads");
+          if (!fs.existsSync(uploadsDir)) {
+            fs.mkdirSync(uploadsDir, { recursive: true });
+          }
+          const fileName = `garment-${crypto.randomUUID()}.${ext}`;
+          diskFilePath = path.join(uploadsDir, fileName);
+          fs.writeFileSync(diskFilePath, buffer);
+          image = `/uploads/${fileName}`;
+        }
+      } catch (e) {
+        console.warn("Could not save data URI to uploads, storing as data URI:", e);
+      }
+    } else if (image.startsWith("/")) {
+      const localCandidate = path.join(process.cwd(), "public", image.slice(1));
+      if (fs.existsSync(localCandidate)) {
+        diskFilePath = localCandidate;
+      }
+    }
+
+    // Automated Dominant Color & Palette Extraction via Sharp
+    // Runs for all uploads (multipart, cutouts, base64, and files) when color is not explicitly set
+    if (diskFilePath && fs.existsSync(diskFilePath)) {
+      try {
+        const extracted = await paletteFromFile(diskFilePath);
+        if (!colorHex || colorHex === "#17140e") {
+          colorHex = extracted.dominant;
+        }
+        if (!color) {
+          color = extracted.colorName;
+        }
+      } catch (e) {
+        console.warn("Auto color extraction failed, using manual or default values:", e);
+      }
+    }
+
+    // Fallback default if extraction was not available
+    if (!colorHex) {
+      colorHex = "#17140e";
     }
 
     if (!name.trim()) {

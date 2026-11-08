@@ -28,11 +28,15 @@ export async function PATCH(
   const body = await req.json();
 
   if (body.isDefault) {
-    const updated = setDefaultPerson(id);
-    return NextResponse.json({ person: updated });
+    setDefaultPerson(id);
   }
 
-  const updated = updatePerson(id, body);
+  const { isDefault, ...otherUpdates } = body;
+  let updated = getPersonById(id);
+  if (Object.keys(otherUpdates).length > 0) {
+    updated = updatePerson(id, otherUpdates);
+  }
+
   if (!updated) {
     return NextResponse.json({ error: "Person profile not found" }, { status: 404 });
   }

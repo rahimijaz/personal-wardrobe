@@ -49,12 +49,33 @@ export interface Garment {
   createdAt: string;
 }
 
+export type BodySilhouette = "slim" | "athletic" | "regular" | "curvy" | "relaxed";
+export type PersonaPosture = "standing-frontal" | "standing-quarter" | "seated";
+export type PersonaFraming = "full-body" | "three-quarters" | "upper-body";
+export type PersonaLighting = "studio-neutral" | "warm-sunlight" | "cool-ambient";
+
+export interface PersonaCalibration {
+  heightCm?: number;
+  bodySilhouette?: BodySilhouette;
+  posture?: PersonaPosture;
+  framing?: PersonaFraming;
+  lighting?: PersonaLighting;
+  zoom?: number;       // scale: 0.8 - 1.5, default 1.0
+  yOffset?: number;    // vertical offset %, default 0 (-30% to +30%)
+  xOffset?: number;    // horizontal offset %, default 0 (-20% to +20%)
+  showGuidelines?: boolean;
+  score?: number;      // 0 - 100
+  calibratedAt?: string;
+  notes?: string;
+}
+
 export interface Person {
   id: string;
   name: string;
   image: string;
   isDefault?: boolean;
   createdAt: string;
+  calibration?: PersonaCalibration;
 }
 
 export interface Outfit {

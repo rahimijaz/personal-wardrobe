@@ -14,15 +14,23 @@ import {
   Trash2,
   Sparkles,
   Upload,
+  UploadCloud,
   X,
   Check,
   Shirt,
   Info,
   SlidersHorizontal,
   ChevronDown,
+  Loader2,
+  Wand2,
+  Eye,
+  RefreshCw,
+  Compass,
+  Palette,
 } from "lucide-react";
 import clsx from "clsx";
 import { useWardrobe } from "@/context/wardrobe-context";
+import { BatchUploadModal } from "@/components/batch-upload-modal";
 import {
   CATEGORIES,
   CATEGORY_LABEL,
@@ -47,7 +55,48 @@ export default function WardrobePage() {
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | "name" | "favorite">("newest");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
+  const [droppedFiles, setDroppedFiles] = useState<File[]>([]);
+  const [isWindowDragging, setIsWindowDragging] = useState(false);
+  const dragCounterRef = useRef(0);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+
+  // Drag and drop overlay handlers for bulk file dropping anywhere on page
+  const handleWindowDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current += 1;
+    if (e.dataTransfer.types.includes("Files")) {
+      setIsWindowDragging(true);
+    }
+  };
+
+  const handleWindowDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setIsWindowDragging(false);
+    }
+  };
+
+  const handleWindowDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const handleWindowDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current = 0;
+    setIsWindowDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const files = Array.from(e.dataTransfer.files).filter((f) =>
+        f.type.startsWith("image/")
+      );
+      if (files.length > 0) {
+        setDroppedFiles(files);
+        setIsBatchModalOpen(true);
+      }
+    }
+  };
 
   // Filtered and sorted garments
   const filteredGarments = useMemo(() => {
@@ -83,7 +132,30 @@ export default function WardrobePage() {
   }, [garments, activeCategory, searchQuery, sortBy]);
 
   return (
-    <div className="flex-1 p-6 sm:p-8 md:p-10 max-w-7xl mx-auto w-full page-enter">
+    <div
+      onDragEnter={handleWindowDragEnter}
+      onDragLeave={handleWindowDragLeave}
+      onDragOver={handleWindowDragOver}
+      onDrop={handleWindowDrop}
+      className="flex-1 p-6 sm:p-8 md:p-10 max-w-7xl mx-auto w-full page-enter relative"
+    >
+      {/* Full-Screen Drag and Drop Overlay */}
+      {isWindowDragging && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/75 backdrop-blur-md pointer-events-none p-6 animate-fadeIn">
+          <div className="flex flex-col items-center justify-center rounded-3xl border-3 border-dashed border-flame bg-paper/95 p-10 text-center shadow-2xl max-w-md w-full">
+            <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-flame/15 text-flame mb-4 animate-bounce">
+              <UploadCloud className="h-10 w-10" />
+            </div>
+            <h3 className="font-display text-2xl font-bold text-ink">
+              Drop Clothing to Import
+            </h3>
+            <p className="mt-2 text-xs text-ink-soft leading-relaxed">
+              Release files anywhere to open the Batch Ingestion Studio with automated RMBG-1.4 background removal and color extraction.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div>
@@ -102,13 +174,35 @@ export default function WardrobePage() {
           </div>
         </div>
 
-        <button
-          onClick={() => setIsAddModalOpen(true)}
-          className="btn-primary inline-flex items-center justify-center gap-2 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-bone shadow-md transition-all duration-200 hover:bg-flame hover:scale-[1.02]"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Add Clothing</span>
-        </button>
+        {/* Action Buttons */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <Link
+            href="/harmony"
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-line bg-paper px-4 py-2.5 text-xs font-semibold text-ink shadow-sm transition-all duration-200 hover:border-flame/50 hover:bg-bone-deep cursor-pointer"
+            title="Explore wardrobe mapped onto interactive color harmony wheel"
+          >
+            <Palette className="h-4 w-4 text-flame" />
+            <span>Color Wheel</span>
+          </Link>
+          <button
+            onClick={() => {
+              setDroppedFiles([]);
+              setIsBatchModalOpen(true);
+            }}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-line bg-paper px-4 py-2.5 text-xs font-semibold text-ink shadow-sm transition-all duration-200 hover:border-flame/50 hover:bg-bone-deep cursor-pointer"
+            title="Batch upload multiple garments with auto background removal"
+          >
+            <UploadCloud className="h-4 w-4 text-flame" />
+            <span>Batch Ingestion</span>
+          </button>
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            className="btn-primary inline-flex items-center justify-center gap-2 rounded-full bg-ink px-5 py-2.5 text-xs font-semibold text-bone shadow-md transition-all duration-200 hover:bg-flame hover:scale-[1.02] cursor-pointer"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Add Piece</span>
+          </button>
+        </div>
       </div>
 
       {/* Category Tabs */}
@@ -268,13 +362,25 @@ export default function WardrobePage() {
                 Reset Filters
               </button>
             ) : (
-              <button
-                onClick={() => setIsAddModalOpen(true)}
-                className="btn-primary inline-flex items-center gap-2 rounded-full bg-ink px-6 py-3 text-xs font-bold text-bone hover:bg-flame transition-colors shadow-md"
-              >
-                <Plus className="h-4 w-4" />
-                <span>Add Your First Garment</span>
-              </button>
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <button
+                  onClick={() => {
+                    setDroppedFiles([]);
+                    setIsBatchModalOpen(true);
+                  }}
+                  className="inline-flex items-center gap-2 rounded-full border border-line bg-bone px-5 py-3 text-xs font-bold text-ink hover:bg-bone-deep hover:border-flame/40 transition-colors cursor-pointer"
+                >
+                  <UploadCloud className="h-4 w-4 text-flame" />
+                  <span>Batch Ingestion</span>
+                </button>
+                <button
+                  onClick={() => setIsAddModalOpen(true)}
+                  className="btn-primary inline-flex items-center gap-2 rounded-full bg-ink px-6 py-3 text-xs font-bold text-bone hover:bg-flame transition-colors shadow-md cursor-pointer"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Add Single Piece</span>
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -338,13 +444,25 @@ export default function WardrobePage() {
 
                   <div className="mt-3 flex items-center justify-between border-t border-line/60 pt-2.5">
                     {isVton ? (
-                      <Link
-                        href={`/try-on?garmentId=${garment.id}`}
-                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-flame hover:underline"
-                      >
-                        <Sparkles className="h-3 w-3" />
-                        <span>Try On</span>
-                      </Link>
+                      <div className="flex items-center gap-2.5">
+                        <Link
+                          href={`/try-on?garmentId=${garment.id}`}
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-flame hover:underline"
+                        >
+                          <Sparkles className="h-3 w-3" />
+                          <span>Try On</span>
+                        </Link>
+                        {(garment.category === "tops" || garment.category === "bottoms") && (
+                          <Link
+                            href={`/match?pieceId=${garment.id}`}
+                            className="inline-flex items-center gap-1 text-[11px] font-medium text-ink-soft hover:text-ink transition-colors"
+                            title="Find matching pieces"
+                          >
+                            <Compass className="h-3 w-3 text-ink-soft" />
+                            <span>Matches</span>
+                          </Link>
+                        )}
+                      </div>
                     ) : (
                       <span className="text-[10px] text-ink-soft/70">
                         Reference only
@@ -451,6 +569,17 @@ export default function WardrobePage() {
           setIsAddModalOpen(false);
         }}
       />
+
+      {/* Batch Ingestion Modal */}
+      <BatchUploadModal
+        isOpen={isBatchModalOpen}
+        onClose={() => {
+          setIsBatchModalOpen(false);
+          setDroppedFiles([]);
+        }}
+        initialFiles={droppedFiles}
+        onGarmentsAdded={refreshGarments}
+      />
     </div>
   );
 }
@@ -474,7 +603,11 @@ function AddGarmentModal({
   const [color, setColor] = useState("");
   const [type, setType] = useState("");
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [originalImage, setOriginalImage] = useState<string | null>(null);
   const [fileToUpload, setFileToUpload] = useState<File | null>(null);
+  const [isRemovingBg, setIsRemovingBg] = useState(false);
+  const [autoRemoveBg, setAutoRemoveBg] = useState(true);
+  const [showOriginal, setShowOriginal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -489,6 +622,31 @@ function AddGarmentModal({
     { label: "Chelsea Boots", url: "/samples/chelsea-boots.jpg", category: "shoes", color: "Black Leather" },
   ];
 
+  const triggerRemoveBackground = async (imageInput: string) => {
+    setIsRemovingBg(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/garments/remove-bg", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: imageInput }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to remove background");
+      }
+      const data = await res.json();
+      setPreviewImage(data.image);
+      setFileToUpload(null);
+    } catch (err: any) {
+      console.warn("Background removal note:", err);
+      // Don't block the user, just notify
+      setError("Background isolation note: " + (err.message || "Could not isolate background. You can still save the original photo."));
+    } finally {
+      setIsRemovingBg(false);
+    }
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -501,10 +659,16 @@ function AddGarmentModal({
     setFileToUpload(file);
     const reader = new FileReader();
     reader.onload = () => {
-      setPreviewImage(reader.result as string);
+      const dataUrl = reader.result as string;
+      setOriginalImage(dataUrl);
+      setPreviewImage(dataUrl);
+      setShowOriginal(false);
       if (!name) {
         const guessedName = file.name.replace(/\.[^/.]+$/, "").replace(/[-_]+/g, " ");
         setName(guessedName);
+      }
+      if (autoRemoveBg) {
+        triggerRemoveBackground(dataUrl);
       }
     };
     reader.readAsDataURL(file);
@@ -526,25 +690,8 @@ function AddGarmentModal({
     setError(null);
 
     try {
-      if (fileToUpload) {
-        const formData = new FormData();
-        formData.append("name", name.trim());
-        formData.append("category", category);
-        formData.append("photoType", photoType);
-        formData.append("color", color.trim());
-        formData.append("type", type.trim());
-        formData.append("image", fileToUpload);
-
-        const res = await fetch("/api/garments", {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!res.ok) {
-          const d = await res.json();
-          throw new Error(d.error || "Failed to upload garment");
-        }
-      } else if (previewImage) {
+      // Prioritize previewImage (transparent cutout or data URI) to preserve cutout
+      if (previewImage) {
         const res = await fetch("/api/garments", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -561,6 +708,24 @@ function AddGarmentModal({
         if (!res.ok) {
           const d = await res.json();
           throw new Error(d.error || "Failed to save garment");
+        }
+      } else if (fileToUpload) {
+        const formData = new FormData();
+        formData.append("name", name.trim());
+        formData.append("category", category);
+        formData.append("photoType", photoType);
+        formData.append("color", color.trim());
+        formData.append("type", type.trim());
+        formData.append("image", fileToUpload);
+
+        const res = await fetch("/api/garments", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!res.ok) {
+          const d = await res.json();
+          throw new Error(d.error || "Failed to upload garment");
         }
       }
 
@@ -589,7 +754,7 @@ function AddGarmentModal({
               Add New Garment
             </h2>
             <p className="text-xs text-ink-soft mt-0.5">
-              Images stay 100% on your device
+              Add pieces to your personal digital wardrobe
             </p>
           </div>
           <button
@@ -604,9 +769,9 @@ function AddGarmentModal({
         <div className="mb-6 flex items-start gap-3 rounded-2xl border border-line bg-bone p-4">
           <Info className="h-4 w-4 text-flame shrink-0 mt-0.5" />
           <p className="text-xs text-ink-soft leading-relaxed">
-            <strong className="text-ink font-semibold">Pro tip for AI try-on:</strong>{" "}
-            For best virtual try-on results, upload a clear product shot or flat-lay showing
-            the entire garment against a neutral background. The garment does not need to be worn by a person.
+            <strong className="text-ink font-semibold">Styling Tip:</strong>{" "}
+            For clean and natural try-on results, upload a flat-lay or catalog photo showing
+            the full garment against a clean background.
           </p>
         </div>
 
@@ -624,22 +789,119 @@ function AddGarmentModal({
             </label>
 
             {previewImage ? (
-              <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border border-line bg-bone-deep">
-                <img
-                  src={previewImage}
-                  alt="Garment Preview"
-                  className="h-full w-full object-contain p-4"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPreviewImage(null);
-                    setFileToUpload(null);
-                  }}
-                  className="absolute top-3 right-3 rounded-full bg-ink/80 p-1.5 text-bone hover:bg-flame transition-colors"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+              <div className="space-y-3">
+                <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border border-line bg-[#f8f7f4] dark:bg-[#181614] flex items-center justify-center p-4">
+                  {/* Subtle checkerboard pattern to visualize transparency */}
+                  <div
+                    className="absolute inset-0 opacity-40 pointer-events-none"
+                    style={{
+                      backgroundImage:
+                        "linear-gradient(45deg, #dfdbd2 25%, transparent 25%), linear-gradient(-45deg, #dfdbd2 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #dfdbd2 75%), linear-gradient(-45deg, transparent 75%, #dfdbd2 75%)",
+                      backgroundSize: "20px 20px",
+                      backgroundPosition: "0 0, 0 10px, 10px -10px, -10px 0px",
+                    }}
+                  />
+
+                  {/* Garment Image */}
+                  <img
+                    src={showOriginal && originalImage ? originalImage : previewImage}
+                    alt="Garment Preview"
+                    className="relative z-10 max-h-full max-w-full object-contain drop-shadow-md transition-all duration-300"
+                  />
+
+                  {/* Removing BG Loading Overlay */}
+                  {isRemovingBg && (
+                    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-paper/85 backdrop-blur-xs text-ink space-y-2">
+                      <div className="relative flex h-10 w-10 items-center justify-center rounded-full bg-flame/10">
+                        <Loader2 className="h-6 w-6 animate-spin text-flame" />
+                        <Wand2 className="absolute -top-1 -right-1 h-3.5 w-3.5 text-ink animate-pulse" />
+                      </div>
+                      <span className="text-xs font-semibold text-ink">
+                        Isolating garment silhouette...
+                      </span>
+                      <span className="text-[10px] text-ink-soft">
+                        Creating transparent studio cutout
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Cutout badge */}
+                  {originalImage && previewImage !== originalImage && !isRemovingBg && (
+                    <div className="absolute top-3 left-3 z-20 flex items-center gap-1.5 rounded-full bg-emerald-600/90 px-2.5 py-1 text-[10px] font-mono font-semibold text-white shadow-xs backdrop-blur-md">
+                      <Sparkles className="h-3 w-3" />
+                      <span>{showOriginal ? "Original Photo" : "Transparent Cutout"}</span>
+                    </div>
+                  )}
+
+                  {/* Clear button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPreviewImage(null);
+                      setOriginalImage(null);
+                      setFileToUpload(null);
+                      setShowOriginal(false);
+                    }}
+                    className="absolute top-3 right-3 z-20 rounded-full bg-ink/80 p-1.5 text-bone hover:bg-flame transition-colors cursor-pointer"
+                    title="Remove image"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                {/* Background Removal Actions & Comparison Bar */}
+                <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl border border-line bg-bone text-xs">
+                  <div className="flex items-center gap-2">
+                    {originalImage && previewImage !== originalImage ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setShowOriginal(!showOriginal)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border border-line bg-paper text-ink font-semibold hover:bg-bone-deep transition-colors cursor-pointer"
+                        >
+                          <Eye className="h-3.5 w-3.5 text-flame" />
+                          <span>{showOriginal ? "Show Cutout" : "Compare Original"}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (originalImage) {
+                              setPreviewImage(originalImage);
+                              setShowOriginal(false);
+                            }
+                          }}
+                          className="text-[11px] text-ink-soft hover:text-ink transition-colors cursor-pointer underline"
+                        >
+                          Revert to raw photo
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={isRemovingBg}
+                        onClick={() => {
+                          const target = originalImage || previewImage;
+                          if (target) triggerRemoveBackground(target);
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-ink text-bone font-semibold hover:bg-flame transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+                      >
+                        <Wand2 className="h-3.5 w-3.5 text-flame" />
+                        <span>Isolate Garment Background</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Auto-remove Toggle Checkbox */}
+                  <label className="flex items-center gap-2 cursor-pointer select-none text-[11px] text-ink font-medium">
+                    <input
+                      type="checkbox"
+                      checked={autoRemoveBg}
+                      onChange={(e) => setAutoRemoveBg(e.target.checked)}
+                      className="accent-flame rounded h-3.5 w-3.5 cursor-pointer"
+                    />
+                    <span>Auto-remove on upload</span>
+                  </label>
+                </div>
               </div>
             ) : (
               <div>

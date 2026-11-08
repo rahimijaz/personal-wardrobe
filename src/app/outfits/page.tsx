@@ -17,6 +17,7 @@ import {
 import clsx from "clsx";
 import { useWardrobe } from "@/context/wardrobe-context";
 import type { Outfit } from "@/lib/types";
+import { LookbookModal } from "@/components/lookbook-modal";
 
 export default function OutfitsPage() {
   const {
@@ -27,6 +28,7 @@ export default function OutfitsPage() {
   } = useWardrobe();
 
   const [selectedOutfit, setSelectedOutfit] = useState<Outfit | null>(null);
+  const [lookbookOutfit, setLookbookOutfit] = useState<Outfit | null>(null);
 
   return (
     <div className="flex-1 p-6 sm:p-8 md:p-10 max-w-7xl mx-auto w-full page-enter">
@@ -148,10 +150,22 @@ export default function OutfitsPage() {
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setLookbookOutfit(outfit);
+                    }}
+                    className="rounded-full border border-flame/30 bg-flame/10 px-2.5 py-1 text-xs font-semibold text-flame hover:bg-flame hover:text-white transition-all inline-flex items-center gap-1 cursor-pointer"
+                    title="Export social fit card & lookbook"
+                  >
+                    <Sparkles className="h-3 w-3" />
+                    <span>Fit Card</span>
+                  </button>
+
                   <button
                     onClick={() => setSelectedOutfit(outfit)}
-                    className="rounded-full border border-line bg-bone px-3 py-1.5 text-xs font-semibold text-ink hover:bg-bone-deep transition-colors"
+                    className="rounded-full border border-line bg-bone px-2.5 py-1 text-xs font-semibold text-ink hover:bg-bone-deep transition-colors cursor-pointer"
                   >
                     View
                   </button>
@@ -162,7 +176,7 @@ export default function OutfitsPage() {
                         deleteOutfit(outfit.id);
                       }
                     }}
-                    className="p-1.5 text-ink-soft hover:text-red-500 transition-colors"
+                    className="p-1.5 text-ink-soft hover:text-red-500 transition-colors cursor-pointer"
                     title="Delete outfit"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -288,6 +302,14 @@ export default function OutfitsPage() {
                       <span>Try Look Again with Another Persona</span>
                     </Link>
 
+                    <button
+                      onClick={() => setLookbookOutfit(selectedOutfit)}
+                      className="w-full inline-flex items-center justify-center gap-2 rounded-full border border-flame/40 bg-flame/10 hover:bg-flame hover:text-white px-5 py-3 text-xs font-bold text-flame transition-all shadow-xs cursor-pointer"
+                    >
+                      <Sparkles className="h-4 w-4" />
+                      <span>Export Social Fit Card & Lookbook</span>
+                    </button>
+
                     <div className="grid grid-cols-2 gap-2.5">
                       <button
                         onClick={() => {
@@ -296,10 +318,10 @@ export default function OutfitsPage() {
                           a.download = `outfit-${selectedOutfit.id}.png`;
                           a.click();
                         }}
-                        className="inline-flex items-center justify-center gap-2 rounded-full border border-line bg-bone px-4 py-2.5 text-xs font-semibold text-ink hover:bg-bone-deep transition-colors"
+                        className="inline-flex items-center justify-center gap-2 rounded-full border border-line bg-bone px-4 py-2.5 text-xs font-semibold text-ink hover:bg-bone-deep transition-colors cursor-pointer"
                       >
                         <Download className="h-3.5 w-3.5" />
-                        <span>Download</span>
+                        <span>Raw Image</span>
                       </button>
 
                       <button
@@ -309,7 +331,7 @@ export default function OutfitsPage() {
                             prev ? { ...prev, favorite: !prev.favorite } : null
                           );
                         }}
-                        className="inline-flex items-center justify-center gap-2 rounded-full border border-line bg-bone px-4 py-2.5 text-xs font-semibold text-ink hover:bg-bone-deep transition-colors"
+                        className="inline-flex items-center justify-center gap-2 rounded-full border border-line bg-bone px-4 py-2.5 text-xs font-semibold text-ink hover:bg-bone-deep transition-colors cursor-pointer"
                       >
                         <Heart
                           className={`h-3.5 w-3.5 ${
@@ -329,7 +351,7 @@ export default function OutfitsPage() {
                           setSelectedOutfit(null);
                         }
                       }}
-                      className="w-full text-center text-xs text-ink-soft hover:text-red-500 py-1 transition-colors"
+                      className="w-full text-center text-xs text-ink-soft hover:text-red-500 py-1 transition-colors cursor-pointer"
                     >
                       Delete this outfit
                     </button>
@@ -340,6 +362,13 @@ export default function OutfitsPage() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Social Fit Card & Lookbook Modal */}
+      <LookbookModal
+        isOpen={Boolean(lookbookOutfit)}
+        onClose={() => setLookbookOutfit(null)}
+        outfit={lookbookOutfit}
+      />
     </div>
   );
 }

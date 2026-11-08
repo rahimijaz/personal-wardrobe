@@ -21,6 +21,8 @@ import {
   Moon,
   Asterisk,
   Activity,
+  Compass,
+  Palette,
 } from "lucide-react";
 import clsx from "clsx";
 import { useWardrobe } from "@/context/wardrobe-context";
@@ -28,9 +30,11 @@ import { useWardrobe } from "@/context/wardrobe-context";
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, description: "Overview & quick actions" },
   { href: "/wardrobe", label: "My Wardrobe", icon: Shirt, description: "Browse & manage garments" },
-  { href: "/try-on", label: "Virtual Try-On", icon: Sparkles, description: "AI outfit generation" },
+  { href: "/match", label: "Fit Recommender", icon: Compass, description: "Matching tops & bottoms" },
+  { href: "/harmony", label: "Color Wheel", icon: Palette, description: "Interactive color harmony" },
+  { href: "/try-on", label: "Virtual Try-On", icon: Sparkles, description: "Virtual styling studio" },
   { href: "/outfits", label: "My Outfits", icon: Layers, description: "Saved looks gallery" },
-  { href: "/profile", label: "Profile", icon: User, description: "Persona management" },
+  { href: "/profile", label: "Persona Studio", icon: User, description: "Calibration & models" },
   { href: "/settings", label: "Settings", icon: Settings, description: "Engine & preferences" },
 ];
 
@@ -151,9 +155,9 @@ export function AppNav() {
             transition={{ duration: 0.2 }}
             className="fixed inset-x-0 top-16 z-30 border-b border-line bg-bone/95 backdrop-blur-lg px-5 py-5 shadow-2xl lg:hidden"
           >
-            <div className="mb-4 flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-800 dark:text-emerald-300">
-              <ShieldCheck className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-              <span>100% Local · Your photos stay on your device</span>
+            <div className="mb-4 flex items-center gap-2 rounded-xl border border-line bg-bone-deep/50 px-3 py-2 text-xs font-semibold text-ink-soft">
+              <Sparkles className="h-3.5 w-3.5 text-flame" />
+              <span>Personal Styling Studio</span>
             </div>
             <NavLinks onClick={() => setMobileOpen(false)} />
             {activePerson && (
@@ -192,18 +196,14 @@ export function AppNav() {
           </Link>
         </div>
 
-        {/* Privacy Badge */}
+        {/* Studio Status Pill */}
         <div className="px-5 pt-4">
-          <div className="flex items-center gap-2.5 rounded-xl border border-emerald-700/15 dark:border-emerald-500/25 bg-emerald-500/5 dark:bg-emerald-500/12 px-3 py-2.5">
-            <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-            <div className="leading-tight">
-              <p className="text-[11px] font-bold text-emerald-900 dark:text-emerald-300">
-                100% Local Storage
-              </p>
-              <p className="text-[10px] text-emerald-700/75 dark:text-emerald-400/80">
-                Your photos stay on your device
-              </p>
-            </div>
+          <div className="flex items-center justify-between rounded-xl border border-line bg-bone/70 px-3 py-2 text-xs text-ink-soft">
+            <span className="font-mono text-[10px] uppercase tracking-wider font-semibold">Studio Session</span>
+            <span className="flex items-center gap-1.5 font-semibold text-ink text-[11px]">
+              <span className="h-2 w-2 rounded-full bg-emerald-500 inline-block" />
+              Private
+            </span>
           </div>
         </div>
 
@@ -302,13 +302,16 @@ export function AppNav() {
                   alt={activePerson.name}
                   className="h-9 w-9 rounded-full border-2 border-line object-cover"
                 />
-                <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-emerald-500 border-2 border-paper" />
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-xs font-bold text-ink group-hover:text-flame transition-colors">
                   {activePerson.name}
                 </p>
-                <p className="text-[10px] text-ink-soft">Active Persona</p>
+                <p className="text-[10px] text-ink-soft">
+                  {activePerson.calibration?.score
+                    ? `${activePerson.calibration.score}% Calibrated`
+                    : "Active Persona"}
+                </p>
               </div>
               <ChevronRight className="h-3.5 w-3.5 text-ink-soft shrink-0" />
             </Link>
@@ -317,18 +320,19 @@ export function AppNav() {
           {/* Engine Status */}
           <div className="flex items-center justify-between rounded-lg bg-bone-deep/50 px-3 py-2 text-[11px] text-ink-soft">
             <div className="flex items-center gap-2 truncate">
-              <Activity className="h-3.5 w-3.5 text-ink-soft shrink-0" />
-              <span className="truncate">
-                {engineStatus?.device ? `Engine: ${engineStatus.device}` : "FASHN-VTON DirectML"}
+              <span
+                className={clsx(
+                  "h-2 w-2 rounded-full shrink-0",
+                  engineStatus?.online ? "bg-emerald-500" : "bg-amber-500"
+                )}
+              />
+              <span className="truncate font-medium">
+                {engineStatus?.online ? "Studio Ready" : "Reconnecting..."}
               </span>
             </div>
-            <span
-              className={clsx(
-                "h-2 w-2 rounded-full shrink-0 ml-2",
-                engineStatus?.online ? "bg-emerald-500" : "bg-amber-500"
-              )}
-              title={engineStatus?.online ? "VTON Service Connected" : "Local Engine Ready"}
-            />
+            <span className="text-[10px] font-mono uppercase text-ink-soft/70">
+              {engineStatus?.online ? "Active" : "Idle"}
+            </span>
           </div>
         </div>
       </aside>

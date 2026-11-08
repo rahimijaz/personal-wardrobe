@@ -19,10 +19,18 @@ export async function POST(req: Request) {
     let image = "";
     let isDefault = false;
 
+    let calibration = undefined;
+
     if (contentType.includes("multipart/form-data")) {
       const formData = await req.formData();
       name = (formData.get("name") as string) || "Persona";
       isDefault = formData.get("isDefault") === "true";
+      const calRaw = formData.get("calibration");
+      if (typeof calRaw === "string") {
+        try {
+          calibration = JSON.parse(calRaw);
+        } catch {}
+      }
 
       const file = formData.get("image");
       if (file instanceof File) {
@@ -44,13 +52,14 @@ export async function POST(req: Request) {
       name = body.name || "Persona";
       image = body.image || "";
       isDefault = Boolean(body.isDefault);
+      calibration = body.calibration;
     }
 
     if (!image) {
       return NextResponse.json({ error: "Person image is required" }, { status: 400 });
     }
 
-    const person = createPerson(name, image, isDefault);
+    const person = createPerson(name, image, isDefault, calibration);
     return NextResponse.json({ person }, { status: 201 });
   } catch (err: any) {
     console.error("Error creating person profile:", err);

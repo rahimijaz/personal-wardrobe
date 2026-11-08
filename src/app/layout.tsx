@@ -6,34 +6,32 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "fitcheck — Private AI Wardrobe & Virtual Try-On Studio",
+    default: "fitcheck — Digital Wardrobe & Virtual Try-On Studio",
     template: "%s · fitcheck",
   },
   description:
-    "Your private digital wardrobe and local AI virtual try-on studio. Organize clothing, build outfits, and render photorealistic looks with on-device FASHN-VTON. 100% local — photos never leave your machine.",
+    "Your private digital wardrobe and virtual styling studio. Organize your collection, craft complete outfits, and preview realistic try-on looks with precision detail.",
   keywords: [
     "virtual try-on",
-    "AI wardrobe",
-    "FASHN-VTON",
-    "local AI",
-    "fashion AI",
-    "private wardrobe",
+    "digital wardrobe",
+    "outfit planner",
+    "fashion studio",
+    "personal styling",
     "outfit generator",
-    "DirectML",
   ],
   authors: [{ name: "fitcheck Studio" }],
   openGraph: {
-    title: "fitcheck — Private AI Wardrobe & Try-On Studio",
+    title: "fitcheck — Digital Wardrobe & Styling Studio",
     description:
-      "Organize your wardrobe and create photorealistic AI try-on looks, all locally on your device.",
+      "Organize your wardrobe and preview realistic try-on looks in your personal styling studio.",
     type: "website",
     locale: "en_US",
   },
   twitter: {
     card: "summary_large_image",
-    title: "fitcheck — Private AI Wardrobe & Try-On Studio",
+    title: "fitcheck — Digital Wardrobe & Styling Studio",
     description:
-      "Organize your wardrobe and create photorealistic AI try-on looks, all locally on your device.",
+      "Organize your wardrobe and preview realistic try-on looks in your personal styling studio.",
   },
   robots: {
     index: false, // private local app — don't index

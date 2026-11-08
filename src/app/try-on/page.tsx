@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, Suspense } from "react";
+import { useState, useEffect, useRef, useMemo, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -24,9 +24,15 @@ import {
   Activity,
   Cpu,
   Sliders,
+  Plus,
+  Layers,
+  Scissors,
+  Compass,
+  TrendingUp,
 } from "lucide-react";
 import clsx from "clsx";
 import { useWardrobe } from "@/context/wardrobe-context";
+import { getMatchesForGarment, scorePair } from "@/lib/recommendations";
 import {
   VTON_CATEGORIES,
   CATEGORY_LABEL,
@@ -53,6 +59,8 @@ export default function TryOnPage() {
 function TryOnContent() {
   const searchParams = useSearchParams();
   const initialGarmentId = searchParams.get("garmentId");
+  const initialTopId = searchParams.get("topId");
+  const initialBottomId = searchParams.get("bottomId");
 
   const {
     garments,
@@ -61,6 +69,7 @@ function TryOnContent() {
     activeJob,
     setActivePersonById,
     startTryOn,
+    cancelActiveJob,
     saveOutfit,
     clearActiveJob,
     engineStatus,
@@ -68,14 +77,18 @@ function TryOnContent() {
     updateInferenceParams,
   } = useWardrobe();
 
-  // Selected state
+  // Selected state: Support choosing Top, Bottom, or both
   const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
-  const [selectedGarment, setSelectedGarment] = useState<Garment | null>(null);
+  const [selectedTop, setSelectedTop] = useState<Garment | null>(null);
+  const [selectedBottom, setSelectedBottom] = useState<Garment | null>(null);
+  const [pickerSlot, setPickerSlot] = useState<"top" | "bottom">("top");
   const [isPersonPickerOpen, setIsPersonPickerOpen] = useState(false);
   const [isGarmentPickerOpen, setIsGarmentPickerOpen] = useState(false);
+  const [pickerFilterCategory, setPickerFilterCategory] = useState<string>("all");
 
   // Status & local states
   const [isInitiating, setIsInitiating] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
@@ -87,21 +100,61 @@ function TryOnContent() {
   }, [activePerson, selectedPerson]);
 
   useEffect(() => {
-    if (initialGarmentId && garments.length > 0) {
+    if (garments.length === 0) return;
+
+    if (initialTopId || initialBottomId) {
+      if (initialTopId) {
+        const foundTop = garments.find((g) => g.id === initialTopId);
+        if (foundTop) setSelectedTop(foundTop);
+      }
+      if (initialBottomId) {
+        const foundBottom = garments.find((g) => g.id === initialBottomId);
+        if (foundBottom) setSelectedBottom(foundBottom);
+      }
+      return;
+    }
+
+    if (initialGarmentId) {
       const found = garments.find((g) => g.id === initialGarmentId);
       if (found) {
-        setSelectedGarment(found);
+        if (found.category === "bottoms") {
+          setSelectedBottom(found);
+        } else {
+          setSelectedTop(found);
+        }
       }
-    } else if (!selectedGarment && garments.length > 0) {
-      // Pick first compatible garment (tops / bottoms / one-pieces)
-      const compatible = garments.find((g) =>
-        VTON_CATEGORIES.includes(g.category as any)
-      );
-      if (compatible) {
-        setSelectedGarment(compatible);
-      }
+      return;
     }
-  }, [initialGarmentId, garments, selectedGarment]);
+
+    if (!selectedTop && !selectedBottom) {
+      // Pick first compatible top and bottom as convenient starting points
+      const defaultTop = garments.find((g) => g.category === "tops" || g.category === "one-pieces");
+      const defaultBottom = garments.find((g) => g.category === "bottoms");
+      if (defaultTop) setSelectedTop(defaultTop);
+      if (defaultBottom) setSelectedBottom(defaultBottom);
+    }
+  }, [initialGarmentId, initialTopId, initialBottomId, garments]);
+
+  // Computed match suggestion for active selection
+  const matchSuggestions = useMemo(() => {
+    if (selectedTop && !selectedBottom) {
+      return getMatchesForGarment(selectedTop, garments, "all", 4);
+    }
+    if (selectedBottom && !selectedTop) {
+      return getMatchesForGarment(selectedBottom, garments, "all", 4);
+    }
+    return [];
+  }, [selectedTop, selectedBottom, garments]);
+
+  const activePairScore = useMemo(() => {
+    if (selectedTop && selectedBottom) {
+      return scorePair(selectedTop, selectedBottom);
+    }
+    return null;
+  }, [selectedTop, selectedBottom]);
+
+  // Array of active garments selected for try-on (0, 1, or 2)
+  const selectedGarments = [selectedTop, selectedBottom].filter(Boolean) as Garment[];
 
   // Check if active job belongs to current selection
   const isJobRunning =
@@ -119,14 +172,7 @@ function TryOnContent() {
   const isJobFailed = activeJob && activeJob.status === "failed";
 
   const handleStartGeneration = async () => {
-    if (!selectedPerson || !selectedGarment) return;
-
-    if (!VTON_CATEGORIES.includes(selectedGarment.category as any)) {
-      setErrorMsg(
-        `Category '${selectedGarment.category}' is not supported by the VTON pipeline. Please select Tops, Bottoms, or One-Pieces.`
-      );
-      return;
-    }
+    if (!selectedPerson || selectedGarments.length === 0) return;
 
     if (engineStatus && !engineStatus.online) {
       setErrorMsg(
@@ -140,11 +186,12 @@ function TryOnContent() {
     setSaveSuccess(false);
 
     try {
+      const garmentIds = selectedGarments.map((g) => g.id);
       await startTryOn(
         selectedPerson.id,
-        selectedGarment.id,
-        selectedGarment.category as VtonCategory,
-        selectedGarment.photoType || "flat-lay",
+        garmentIds,
+        selectedGarments[0].category as VtonCategory,
+        selectedGarments[0].photoType || "flat-lay",
         inferenceParams
       );
     } catch (err: any) {
@@ -155,14 +202,19 @@ function TryOnContent() {
   };
 
   const handleSaveOutfit = async () => {
-    if (!activeJob || !activeJob.result || !selectedPerson || !selectedGarment) return;
+    if (!activeJob || !activeJob.result || !selectedPerson || selectedGarments.length === 0) return;
     try {
+      const outfitTitle =
+        selectedGarments.length > 1
+          ? `${selectedPerson.name.split(" ")[0]}'s Full Look: ${selectedTop?.name} + ${selectedBottom?.name}`
+          : `${selectedPerson.name.split(" ")[0]} in ${selectedGarments[0].name}`;
+
       await saveOutfit({
-        name: `${selectedPerson.name.split(" ")[0]} in ${selectedGarment.name}`,
+        name: outfitTitle,
         personId: selectedPerson.id,
-        garmentIds: [selectedGarment.id],
+        garmentIds: selectedGarments.map((g) => g.id),
         resultImage: activeJob.result,
-        category: selectedGarment.category,
+        category: selectedGarments.length > 1 ? "one-pieces" : selectedGarments[0].category,
       });
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
@@ -227,13 +279,13 @@ function TryOnContent() {
 
         {engineStatus?.online ? (
           <div className="inline-flex items-center gap-2 rounded-full border border-emerald-600/20 dark:border-emerald-500/30 bg-emerald-500/10 dark:bg-emerald-500/15 px-3.5 py-1.5 text-xs font-semibold text-emerald-800 dark:text-emerald-300">
-            <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-            <span>FASHN-VTON Online ({engineStatus.device.toUpperCase()})</span>
+            <span className="h-2 w-2 rounded-full bg-emerald-500 inline-block" />
+            <span>Studio Ready</span>
           </div>
         ) : (
           <div className="inline-flex items-center gap-2 rounded-full border border-amber-600/20 dark:border-amber-500/30 bg-amber-500/10 dark:bg-amber-500/15 px-3.5 py-1.5 text-xs font-semibold text-amber-800 dark:text-amber-300">
             <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-            <span>VTON Backend Offline (Port 8188)</span>
+            <span>Studio Offline</span>
           </div>
         )}
       </div>
@@ -288,7 +340,7 @@ function TryOnContent() {
                   className="h-full w-full object-cover"
                 />
                 <div className="absolute top-3 left-3 rounded-full bg-ink/80 px-3 py-1 text-xs font-mono text-bone backdrop-blur-md">
-                  High-Res AI Result
+                  Tailored Look
                 </div>
               </div>
             </div>
@@ -297,29 +349,41 @@ function TryOnContent() {
             <div className="lg:col-span-5 space-y-6">
               <div>
                 <span className="text-xs font-mono uppercase tracking-widest text-flame font-semibold">
-                  Generation Complete
+                  Fitting Complete
                 </span>
                 <h2 className="font-display text-3xl font-bold text-ink mt-1">
                   Your New Look
                 </h2>
                 <p className="text-xs text-ink-soft mt-1">
-                  Rendered on-device via FASHN-VTON MMDiT flow matching
+                  Rendered with precision in your personal studio
                 </p>
               </div>
 
-              {/* Garment and Person details */}
+              {/* Garments and Person details */}
               <div className="rounded-2xl border border-line bg-bone p-4 space-y-3 text-xs">
-                <div className="flex items-center justify-between border-b border-line pb-2.5">
-                  <span className="text-ink-soft">Garment</span>
-                  <span className="font-semibold text-ink">
-                    {selectedGarment?.name || "Selected piece"}
+                <div className="border-b border-line pb-2.5 space-y-2">
+                  <span className="text-[11px] font-mono uppercase text-ink-soft block font-bold">
+                    {activeJob.garments && activeJob.garments.length > 1
+                      ? "Pieces Styled (2-Piece Ensemble)"
+                      : "Piece Styled"}
                   </span>
-                </div>
-                <div className="flex items-center justify-between border-b border-line pb-2.5">
-                  <span className="text-ink-soft">Category</span>
-                  <span className="font-semibold text-ink capitalize">
-                    {selectedGarment?.category || "Tops"}
-                  </span>
+                  {activeJob.garments && activeJob.garments.length > 0 ? (
+                    activeJob.garments.map((g) => (
+                      <div key={g.id} className="flex items-center justify-between text-ink">
+                        <span className="flex items-center gap-2">
+                          <span className="h-6 w-6 rounded-md overflow-hidden bg-bone-deep inline-block border border-line shrink-0">
+                            <img src={g.image} alt={g.name} className="h-full w-full object-cover" />
+                          </span>
+                          <span className="font-semibold truncate max-w-[170px]">{g.name}</span>
+                        </span>
+                        <span className="font-mono text-[10px] uppercase bg-paper px-2 py-0.5 rounded border border-line text-ink-soft">
+                          {g.category}
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <span className="font-semibold text-ink">{selectedTop?.name || selectedBottom?.name || "Wardrobe Piece"}</span>
+                  )}
                 </div>
                 <div className="flex items-center justify-between border-b border-line pb-2.5">
                   <span className="text-ink-soft">Persona</span>
@@ -328,9 +392,9 @@ function TryOnContent() {
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-ink-soft">Privacy</span>
+                  <span className="text-ink-soft">Studio Mode</span>
                   <span className="font-semibold text-emerald-700 dark:text-emerald-300">
-                    100% Local Device
+                    High Resolution
                   </span>
                 </div>
               </div>
@@ -410,22 +474,22 @@ function TryOnContent() {
           const tqdmBar = formatTqdmBar(currentStep, totalSteps, 22);
 
           const defaultLogs = [
-            "[00:00] Initializing local FASHN-VTON pipeline on DirectML...",
-            "[00:01] Model checkpoints verified: model.safetensors (1.94 GB)",
+            "[00:00] Initializing personal studio session...",
+            "[00:01] Preparing garment texture & silhouette...",
             activeJob.stage === "preparing_person" || activeJob.stage === "preparing_garment" || activeJob.stage === "generating" || activeJob.stage === "finalizing"
-              ? "[00:03] Extracting body keypoints & DensePose warp..."
+              ? "[00:03] Mapping silhouette contours and posture..."
               : null,
             activeJob.stage === "preparing_garment" || activeJob.stage === "generating" || activeJob.stage === "finalizing"
-              ? "[00:05] Garment category confirmed: tops • Inpainting mask aligned."
+              ? "[00:05] Fitting garment drape to model frame..."
               : null,
             ...(Array.from({ length: currentStep }).map((_, idx) => {
               const s = idx + 1;
               const el = Math.round(s * 15.8);
               const eta = Math.max(0, Math.round((totalSteps - s) * 15.8));
-              return `[00:${el < 10 ? "0" + el : el}] Euler Timestep ${s}/${totalSteps} complete [15.8s/it, elapsed: 00:${el < 10 ? "0" + el : el}, eta: ~${eta}s]`;
+              return `[00:${el < 10 ? "0" + el : el}] Refining fabric drape & details (${s}/${totalSteps}) [elapsed: 00:${el < 10 ? "0" + el : el}, eta: ~${eta}s]`;
             })),
             currentStep > 0 && currentStep < totalSteps
-              ? `[>>] Sampling Timestep ${currentStep + 1}/${totalSteps} on AMD Radeon GPU...`
+              ? `[>>] Styling fabric textures (${currentStep + 1}/${totalSteps})...`
               : null,
           ].filter(Boolean) as string[];
 
@@ -446,10 +510,10 @@ function TryOnContent() {
                   </div>
                   <div>
                     <h2 className="font-display text-2xl sm:text-3xl font-bold text-ink">
-                      Generating Virtual Try-On
+                      Tailoring Virtual Look
                     </h2>
                     <p className="text-xs sm:text-sm text-ink-soft">
-                      {activeJob.detail || "DirectML Neural Euler Sampling in progress..."}
+                      {activeJob.detail || "Rendering fabrics and silhouette in studio..."}
                     </p>
                   </div>
                 </div>
@@ -457,11 +521,39 @@ function TryOnContent() {
                 <div className="flex items-center gap-2.5 self-start sm:self-auto">
                   <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 dark:border-emerald-500/30 bg-emerald-500/10 dark:bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-800 dark:text-emerald-300">
                     <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                    <span>GPU Active</span>
+                    <span>Rendering</span>
                   </span>
                   <span className="font-mono text-xs text-ink-soft bg-bone px-2.5 py-1 rounded-full border border-line">
-                    DirectML • {totalSteps} Steps
+                    Studio • {totalSteps} Steps
                   </span>
+                  <button
+                    type="button"
+                    disabled={isCancelling}
+                    onClick={async () => {
+                      if (confirm("Cancel virtual try-on generation? This will stop the local AI engine and free the GPU immediately.")) {
+                        setIsCancelling(true);
+                        try {
+                          await cancelActiveJob();
+                        } finally {
+                          setIsCancelling(false);
+                        }
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-700 dark:text-red-400 px-3 py-1 text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer"
+                    title="Abort virtual try-on job immediately"
+                  >
+                    {isCancelling ? (
+                      <>
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        <span>Aborting...</span>
+                      </>
+                    ) : (
+                      <>
+                        <X className="h-3.5 w-3.5 stroke-[2.5]" />
+                        <span>Cancel</span>
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
 
@@ -533,12 +625,12 @@ function TryOnContent() {
                     <span className="h-3 w-3 rounded-full bg-[#ffbd2e] inline-block" />
                     <span className="h-3 w-3 rounded-full bg-[#27c93f] inline-block" />
                     <span className="ml-2 font-mono text-[11px] text-white/70 flex items-center gap-1.5">
-                      <Terminal className="h-3.5 w-3.5 text-flame" />
-                      fashn-vton-runner ~ DirectML Euler Sampler
+                      <Sparkles className="h-3.5 w-3.5 text-flame" />
+                      Studio Renderer ~ Live Progression
                     </span>
                   </div>
                   <div className="font-mono text-[10px] text-white/50">
-                    GPU Port: 8188
+                    High Resolution
                   </div>
                 </div>
 
@@ -629,7 +721,7 @@ function TryOnContent() {
               <div className="pt-2 text-center text-xs text-ink-soft flex items-center justify-center gap-2">
                 <Clock className="h-3.5 w-3.5 text-ink-soft shrink-0" />
                 <span>
-                  DirectML acceleration active • 5-minute timeout window • Your images never leave your local machine
+                  Crafted in your personal studio • Private session
                 </span>
               </div>
             </motion.div>
@@ -650,12 +742,22 @@ function TryOnContent() {
                     Reference model or your personal photo
                   </p>
                 </div>
-                <button
-                  onClick={() => setIsPersonPickerOpen(true)}
-                  className="rounded-full border border-line bg-bone px-3.5 py-1.5 text-xs font-semibold text-ink hover:bg-bone-deep transition-colors"
-                >
-                  Change Person
-                </button>
+                <div className="flex items-center gap-2">
+                  <Link
+                    href={selectedPerson ? `/profile?calibrate=${selectedPerson.id}` : "/profile"}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-line bg-bone px-3 py-1.5 text-xs font-semibold text-ink hover:bg-bone-deep hover:border-flame/40 transition-colors"
+                    title="Calibrate posture, framing & proportions"
+                  >
+                    <Sliders className="h-3 w-3 text-flame" />
+                    <span>Calibrate</span>
+                  </Link>
+                  <button
+                    onClick={() => setIsPersonPickerOpen(true)}
+                    className="rounded-full border border-line bg-bone px-3.5 py-1.5 text-xs font-semibold text-ink hover:bg-bone-deep transition-colors"
+                  >
+                    Change Person
+                  </button>
+                </div>
               </div>
 
               {selectedPerson ? (
@@ -663,12 +765,35 @@ function TryOnContent() {
                   <img
                     src={selectedPerson.image}
                     alt={selectedPerson.name}
+                    style={
+                      selectedPerson.calibration?.zoom
+                        ? {
+                            transform: `scale(${selectedPerson.calibration.zoom}) translate(${selectedPerson.calibration.xOffset || 0}%, ${selectedPerson.calibration.yOffset || 0}%)`,
+                            transformOrigin: "center center",
+                          }
+                        : undefined
+                    }
                     className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-102"
                   />
-                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-ink/80 via-ink/20 to-transparent p-4 text-bone">
-                    <p className="text-sm font-semibold">{selectedPerson.name}</p>
-                    <p className="text-[10px] text-bone/80 font-mono">
-                      Processed on-device
+                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-ink/90 via-ink/40 to-transparent p-4 text-bone">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold">{selectedPerson.name}</p>
+                      {selectedPerson.calibration?.score && (
+                        <span className="rounded-full bg-emerald-500/20 border border-emerald-400/30 px-2 py-0.5 text-[10px] font-mono font-bold text-emerald-300">
+                          {selectedPerson.calibration.score}% Calibrated
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-bone/80 font-mono mt-1">
+                      {selectedPerson.calibration?.heightCm
+                        ? `${selectedPerson.calibration.heightCm} cm`
+                        : "175 cm"}{" "}
+                      •{" "}
+                      {selectedPerson.calibration?.bodySilhouette
+                        ? selectedPerson.calibration.bodySilhouette.charAt(0).toUpperCase() +
+                          selectedPerson.calibration.bodySilhouette.slice(1)
+                        : "Athletic"}{" "}
+                      Silhouette • DensePose Ready
                     </p>
                   </div>
                 </div>
@@ -688,61 +813,257 @@ function TryOnContent() {
               )}
             </div>
 
-            {/* RIGHT COLUMN: GARMENT */}
+            {/* RIGHT COLUMN: 2 GARMENTS SLOTS (TOP & BOTTOM) */}
             <div className="flex flex-col rounded-3xl border border-line bg-paper p-6 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h3 className="font-display text-xl font-bold text-ink">
-                    2. Garment
+                    2. Garments & Outfit
                   </h3>
                   <p className="text-xs text-ink-soft">
-                    Clothing piece from your digital wardrobe
+                    Choose a Top, a Bottom, or both for a full 2-piece try-on
                   </p>
                 </div>
-                <button
-                  onClick={() => setIsGarmentPickerOpen(true)}
-                  className="rounded-full border border-line bg-bone px-3.5 py-1.5 text-xs font-semibold text-ink hover:bg-bone-deep transition-colors"
+                {/* Mode Indicator Badge */}
+                <span
+                  className={clsx(
+                    "rounded-full px-3 py-1 text-[11px] font-mono font-semibold uppercase tracking-wider border",
+                    selectedTop && selectedBottom
+                      ? "bg-flame/15 text-flame border-flame/30"
+                      : selectedTop || selectedBottom
+                      ? "bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-emerald-500/30"
+                      : "bg-bone-deep text-ink-soft border-line"
+                  )}
                 >
-                  Change Garment
-                </button>
+                  {selectedTop && selectedBottom
+                    ? "2-Piece Outfit"
+                    : selectedTop
+                    ? "Top Only"
+                    : selectedBottom
+                    ? "Bottom Only"
+                    : "No Garment"}
+                </span>
               </div>
 
-              {selectedGarment ? (
-                <div className="relative aspect-[3/4] w-full overflow-hidden rounded-2xl border border-line bg-bone-deep group">
-                  <img
-                    src={selectedGarment.image}
-                    alt={selectedGarment.name}
-                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-102"
-                  />
-                  <div className="absolute top-3 left-3 flex items-center gap-1.5">
-                    <span className="rounded-full bg-ink/85 px-2.5 py-1 text-[11px] font-mono uppercase text-bone backdrop-blur-md">
-                      {selectedGarment.category}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
+                {/* SLOT A: TOP GARMENT */}
+                <div className="flex flex-col rounded-2xl border border-line bg-bone p-3.5 relative">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] font-mono uppercase tracking-wider font-bold text-ink-soft flex items-center gap-1.5">
+                      <Shirt className="h-3.5 w-3.5 text-flame" />
+                      Top Garment
                     </span>
-                    <span className="rounded-full bg-flame px-2 py-0.5 text-[10px] font-mono text-bone backdrop-blur-md">
-                      VTON Ready
+                    {selectedTop && (
+                      <button
+                        onClick={() => setSelectedTop(null)}
+                        className="text-[11px] text-ink-soft hover:text-red-600 transition-colors cursor-pointer flex items-center gap-0.5"
+                        title="Clear top selection"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                        <span>Clear</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {selectedTop ? (
+                    <div className="flex-1 flex flex-col justify-between">
+                      <div className="relative aspect-[3/4] w-full overflow-hidden rounded-xl border border-line bg-bone-deep group">
+                        <img
+                          src={selectedTop.image}
+                          alt={selectedTop.name}
+                          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-102"
+                        />
+                        <span className="absolute top-2 left-2 rounded-full bg-ink/85 px-2 py-0.5 text-[9px] font-mono text-bone uppercase">
+                          {selectedTop.category}
+                        </span>
+                      </div>
+                      <div className="mt-2">
+                        <p className="text-xs font-semibold text-ink truncate">{selectedTop.name}</p>
+                        <p className="text-[10px] text-ink-soft truncate">
+                          {selectedTop.color || selectedTop.type || "Catalog piece"} • {selectedTop.photoType}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setPickerSlot("top");
+                          setIsGarmentPickerOpen(true);
+                        }}
+                        className="mt-2.5 w-full py-1.5 rounded-lg border border-line bg-paper text-xs font-semibold text-ink hover:bg-bone-deep transition-colors text-center cursor-pointer"
+                      >
+                        Change Top
+                      </button>
+                    </div>
+                  ) : (
+                    <div
+                      onClick={() => {
+                        setPickerSlot("top");
+                        setIsGarmentPickerOpen(true);
+                      }}
+                      className="flex-1 min-h-[220px] rounded-xl border-2 border-dashed border-line bg-paper/60 hover:border-flame/50 flex flex-col items-center justify-center p-4 text-center cursor-pointer transition-colors group"
+                    >
+                      <div className="h-10 w-10 rounded-full bg-bone-deep flex items-center justify-center mb-2 group-hover:bg-flame/10">
+                        <Plus className="h-5 w-5 text-ink-soft group-hover:text-flame transition-colors" />
+                      </div>
+                      <span className="text-xs font-semibold text-ink">Choose Top</span>
+                      <span className="text-[10px] text-ink-soft mt-0.5">Tops, shirts, jackets</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* SLOT B: BOTTOM GARMENT */}
+                <div className="flex flex-col rounded-2xl border border-line bg-bone p-3.5 relative">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] font-mono uppercase tracking-wider font-bold text-ink-soft flex items-center gap-1.5">
+                      <Scissors className="h-3.5 w-3.5 text-flame" />
+                      Bottom Garment
+                    </span>
+                    {selectedBottom && (
+                      <button
+                        onClick={() => setSelectedBottom(null)}
+                        className="text-[11px] text-ink-soft hover:text-red-600 transition-colors cursor-pointer flex items-center gap-0.5"
+                        title="Clear bottom selection"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                        <span>Clear</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {selectedBottom ? (
+                    <div className="flex-1 flex flex-col justify-between">
+                      <div className="relative aspect-[3/4] w-full overflow-hidden rounded-xl border border-line bg-bone-deep group">
+                        <img
+                          src={selectedBottom.image}
+                          alt={selectedBottom.name}
+                          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-102"
+                        />
+                        <span className="absolute top-2 left-2 rounded-full bg-ink/85 px-2 py-0.5 text-[9px] font-mono text-bone uppercase">
+                          {selectedBottom.category}
+                        </span>
+                      </div>
+                      <div className="mt-2">
+                        <p className="text-xs font-semibold text-ink truncate">{selectedBottom.name}</p>
+                        <p className="text-[10px] text-ink-soft truncate">
+                          {selectedBottom.color || selectedBottom.type || "Catalog piece"} • {selectedBottom.photoType}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setPickerSlot("bottom");
+                          setIsGarmentPickerOpen(true);
+                        }}
+                        className="mt-2.5 w-full py-1.5 rounded-lg border border-line bg-paper text-xs font-semibold text-ink hover:bg-bone-deep transition-colors text-center cursor-pointer"
+                      >
+                        Change Bottom
+                      </button>
+                    </div>
+                  ) : (
+                    <div
+                      onClick={() => {
+                        setPickerSlot("bottom");
+                        setIsGarmentPickerOpen(true);
+                      }}
+                      className="flex-1 min-h-[220px] rounded-xl border-2 border-dashed border-line bg-paper/60 hover:border-flame/50 flex flex-col items-center justify-center p-4 text-center cursor-pointer transition-colors group"
+                    >
+                      <div className="h-10 w-10 rounded-full bg-bone-deep flex items-center justify-center mb-2 group-hover:bg-flame/10">
+                        <Plus className="h-5 w-5 text-ink-soft group-hover:text-flame transition-colors" />
+                      </div>
+                      <span className="text-xs font-semibold text-ink">Choose Bottom</span>
+                      <span className="text-[10px] text-ink-soft mt-0.5">Jeans, trousers, skirts</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Smart Pairing Recommendation Bar */}
+              {activePairScore ? (
+                <div className="mt-4 rounded-2xl border border-line bg-bone/70 p-3 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800 dark:text-emerald-300 shrink-0">
+                      <TrendingUp className="h-3 w-3" />
+                      {activePairScore.score}% Match
+                    </span>
+                    <span className="text-ink-soft truncate text-[11px]">
+                      {activePairScore.relation} • {activePairScore.stylistNote}
                     </span>
                   </div>
-                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-ink/80 via-ink/20 to-transparent p-4 text-bone">
-                    <p className="text-sm font-semibold">{selectedGarment.name}</p>
-                    <p className="text-[10px] text-bone/80">
-                      {selectedGarment.color || selectedGarment.type || "Catalog piece"} • {selectedGarment.photoType}
-                    </p>
+                  <Link
+                    href="/match"
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-flame hover:underline shrink-0 ml-2"
+                  >
+                    <span>More Fits</span>
+                    <ArrowRight className="h-3 w-3" />
+                  </Link>
+                </div>
+              ) : matchSuggestions.length > 0 ? (
+                <div className="mt-4 rounded-2xl border border-line bg-bone/70 p-3 text-xs">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-semibold text-ink flex items-center gap-1.5 text-[11px]">
+                      <Compass className="h-3.5 w-3.5 text-flame" />
+                      Recommended {selectedTop ? "bottoms" : "tops"} for this piece:
+                    </span>
+                    <Link
+                      href="/match"
+                      className="text-[10px] font-bold text-ink-soft hover:text-ink flex items-center gap-0.5"
+                    >
+                      <span>All Fits</span>
+                      <ChevronRight className="h-3 w-3" />
+                    </Link>
+                  </div>
+                  <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
+                    {matchSuggestions.map((m) => {
+                      const piece = selectedTop ? m.bottom : m.top;
+                      return (
+                        <button
+                          key={piece.id}
+                          type="button"
+                          onClick={() => {
+                            if (selectedTop) setSelectedBottom(piece);
+                            else setSelectedTop(piece);
+                          }}
+                          className="shrink-0 flex items-center gap-2 rounded-xl border border-line bg-paper px-2.5 py-1.5 text-left hover:border-flame hover:scale-[1.02] transition-all cursor-pointer shadow-2xs"
+                        >
+                          <img
+                            src={piece.image}
+                            alt={piece.name}
+                            className="h-7 w-7 rounded-lg object-contain bg-bone shrink-0 p-0.5 border border-line"
+                          />
+                          <div className="min-w-0 max-w-[120px]">
+                            <p className="truncate text-[11px] font-medium text-ink leading-none">{piece.name}</p>
+                            <p className="text-[9px] text-emerald-700 dark:text-emerald-400 font-bold mt-1">
+                              {m.score}% Match
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               ) : (
-                <div
-                  onClick={() => setIsGarmentPickerOpen(true)}
-                  className="aspect-[3/4] w-full rounded-2xl border-2 border-dashed border-line bg-bone flex flex-col items-center justify-center p-8 text-center cursor-pointer hover:border-ink transition-colors"
-                >
-                  <Shirt className="h-10 w-10 text-ink-soft mb-2" />
-                  <p className="text-xs sm:text-sm font-semibold text-ink">
-                    Select clothing piece
-                  </p>
-                  <p className="text-[11px] text-ink-soft mt-1">
-                    Choose from wardrobe
-                  </p>
+                <div className="mt-4 flex items-center justify-between text-xs text-ink-soft rounded-2xl border border-line bg-bone/40 px-3.5 py-2">
+                  <span className="text-[11px]">Need inspiration? Explore curated outfit pairings</span>
+                  <Link
+                    href="/match"
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-flame hover:underline"
+                  >
+                    <span>Open Fit Recommender</span>
+                    <ArrowRight className="h-3 w-3" />
+                  </Link>
                 </div>
               )}
+
+              {/* Status helper banner */}
+              <div className="mt-3 pt-3 border-t border-line flex items-center justify-between text-[11px] text-ink-soft">
+                <span>
+                  {selectedTop && selectedBottom
+                    ? "✓ Both selected: Automatically executes sequential 2-pass try-on (Top → Bottom)."
+                    : selectedTop
+                    ? "✓ Top piece selected: Runs single-pass try-on for the upper body."
+                    : selectedBottom
+                    ? "✓ Bottom piece selected: Runs single-pass try-on for the lower body."
+                    : "Select a top, bottom, or both to enable try-on."}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -754,7 +1075,7 @@ function TryOnContent() {
                 <div className="flex items-center gap-2">
                   <Sliders className="h-4 w-4 text-flame" />
                   <span className="text-xs font-bold text-ink uppercase tracking-wider">
-                    Generation Steps: {inferenceParams.numTimesteps} steps
+                    Generation Steps: {inferenceParams.numTimesteps} steps per pass
                   </span>
                 </div>
                 <Link
@@ -803,7 +1124,11 @@ function TryOnContent() {
                 />
                 <div className="flex items-center justify-between text-[10px] font-mono text-ink-soft">
                   <span>4 (Fastest)</span>
-                  <span>~{Math.round(inferenceParams.numTimesteps * 12.5)}s estimated execution time</span>
+                  <span>
+                    {selectedTop && selectedBottom
+                      ? `~${Math.round(inferenceParams.numTimesteps * 25)}s estimated for 2-pass outfit`
+                      : `~${Math.round(inferenceParams.numTimesteps * 12.5)}s estimated for 1-pass`}
+                  </span>
                   <span>30 (Maximum Detail)</span>
                 </div>
               </div>
@@ -811,17 +1136,25 @@ function TryOnContent() {
 
             <button
               onClick={handleStartGeneration}
-              disabled={isInitiating || !selectedPerson || !selectedGarment}
+              disabled={isInitiating || !selectedPerson || selectedGarments.length === 0}
               className="inline-flex items-center justify-center gap-3 rounded-full bg-ink px-10 py-4 text-base font-bold text-bone shadow-lg transition-all duration-200 hover:bg-flame hover:scale-[1.02] disabled:opacity-40 cursor-pointer"
             >
               <Sparkles className="h-5 w-5 text-flame group-hover:text-bone" />
-              <span>Generate Try-On ({inferenceParams.numTimesteps} Steps)</span>
+              <span>
+                {selectedTop && selectedBottom
+                  ? `Generate Full Outfit (2 Passes • 2x ${inferenceParams.numTimesteps} Steps)`
+                  : selectedTop
+                  ? `Generate Try-On Top (${inferenceParams.numTimesteps} Steps)`
+                  : selectedBottom
+                  ? `Generate Try-On Bottom (${inferenceParams.numTimesteps} Steps)`
+                  : "Select Top or Bottom to Begin"}
+              </span>
             </button>
 
             <div className="mt-4 flex items-center justify-center gap-2 text-xs text-ink-soft">
               <Clock className="h-3.5 w-3.5" />
               <span>
-                Generation runs locally and may take a couple of minutes on DirectML.
+                Styling renders with high-precision detail in about 1-2 minutes.
               </span>
             </div>
           </div>
@@ -854,7 +1187,7 @@ function TryOnContent() {
                     setIsPersonPickerOpen(false);
                   }}
                   className={clsx(
-                    "cursor-pointer rounded-2xl border p-2 transition-all",
+                    "cursor-pointer rounded-2xl border p-2 transition-all group",
                     selectedPerson?.id === p.id
                       ? "border-ink bg-bone-deep ring-2 ring-ink"
                       : "border-line bg-bone hover:border-ink/50"
@@ -864,22 +1197,46 @@ function TryOnContent() {
                     <img
                       src={p.image}
                       alt={p.name}
-                      className="h-full w-full object-cover"
+                      style={
+                        p.calibration?.zoom
+                          ? {
+                              transform: `scale(${p.calibration.zoom}) translate(${p.calibration.xOffset || 0}%, ${p.calibration.yOffset || 0}%)`,
+                              transformOrigin: "center center",
+                            }
+                          : undefined
+                      }
+                      className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
                     />
+                    {p.calibration?.score && (
+                      <div className="absolute bottom-1.5 right-1.5 rounded-md bg-ink/80 px-1.5 py-0.5 text-[9px] font-mono text-bone backdrop-blur-xs">
+                        {p.calibration.score}%
+                      </div>
+                    )}
                   </div>
                   <p className="mt-1.5 text-xs font-semibold text-ink truncate px-1">
                     {p.name}
+                  </p>
+                  <p className="text-[10px] text-ink-soft truncate px-1 font-mono">
+                    {p.calibration?.heightCm ? `${p.calibration.heightCm} cm` : "175 cm"} •{" "}
+                    {p.calibration?.bodySilhouette || "Athletic"}
                   </p>
                 </div>
               ))}
             </div>
 
-            <div className="mt-5 pt-3 border-t border-line flex justify-end">
+            <div className="mt-5 pt-3 border-t border-line flex items-center justify-between text-xs">
               <Link
                 href="/profile"
-                className="text-xs font-semibold text-flame hover:underline"
+                className="font-semibold text-ink hover:text-flame flex items-center gap-1.5"
               >
-                + Upload new person photo in Profile
+                <Sliders className="h-3.5 w-3.5 text-flame" />
+                <span>Open Calibration Studio</span>
+              </Link>
+              <Link
+                href="/profile"
+                className="font-semibold text-flame hover:underline"
+              >
+                + Register New Persona
               </Link>
             </div>
           </div>
@@ -890,13 +1247,25 @@ function TryOnContent() {
       {isGarmentPickerOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4 backdrop-blur-xs">
           <div className="w-full max-w-2xl max-h-[85vh] flex flex-col rounded-3xl border border-line bg-paper p-6 shadow-2xl">
-            <div className="flex items-center justify-between pb-3 border-b border-line mb-4">
+            <div className="flex items-center justify-between pb-3 border-b border-line mb-3">
               <div>
-                <h3 className="font-display text-lg font-bold text-ink">
-                  Select Garment from Wardrobe
+                <h3 className="font-display text-lg font-bold text-ink flex items-center gap-2">
+                  {pickerSlot === "top" ? (
+                    <>
+                      <Shirt className="h-4 w-4 text-flame" />
+                      <span>Choose Top Garment</span>
+                    </>
+                  ) : (
+                    <>
+                      <Scissors className="h-4 w-4 text-flame" />
+                      <span>Choose Bottom Garment</span>
+                    </>
+                  )}
                 </h3>
                 <p className="text-xs text-ink-soft">
-                  Compatible with Tops, Bottoms, and One-Pieces
+                  {pickerSlot === "top"
+                    ? "Select a shirt, hoodie, jacket, or one-piece from your wardrobe"
+                    : "Select pants, jeans, cargo trousers, or skirts from your wardrobe"}
                 </p>
               </div>
               <button
@@ -907,22 +1276,82 @@ function TryOnContent() {
               </button>
             </div>
 
+            {/* Quick Filter Bar */}
+            <div className="flex items-center justify-between pb-3 border-b border-line mb-3">
+              <div className="flex items-center gap-1.5">
+                {[
+                  { id: "all", label: "All Pieces" },
+                  ...(pickerSlot === "top"
+                    ? [
+                        { id: "tops", label: "Tops & Layers" },
+                        { id: "one-pieces", label: "One-Pieces" },
+                      ]
+                    : [{ id: "bottoms", label: "Bottoms & Pants" }]),
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setPickerFilterCategory(tab.id)}
+                    className={clsx(
+                      "px-3 py-1 rounded-full text-xs font-semibold transition-colors cursor-pointer",
+                      pickerFilterCategory === tab.id
+                        ? "bg-ink text-bone shadow-xs"
+                        : "bg-bone border border-line text-ink-soft hover:text-ink"
+                    )}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Clear slot option */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (pickerSlot === "top") setSelectedTop(null);
+                  else setSelectedBottom(null);
+                  setIsGarmentPickerOpen(false);
+                }}
+                className="text-xs text-ink-soft hover:text-red-600 transition-colors cursor-pointer underline"
+              >
+                Clear this slot
+              </button>
+            </div>
+
             <div className="overflow-y-auto flex-1 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 p-1">
               {garments
                 .filter((g) => VTON_CATEGORIES.includes(g.category as any))
+                .filter((g) => {
+                  if (pickerFilterCategory === "all") {
+                    if (pickerSlot === "top") {
+                      return g.category === "tops" || g.category === "one-pieces";
+                    } else {
+                      return g.category === "bottoms";
+                    }
+                  }
+                  return g.category === pickerFilterCategory;
+                })
                 .map((g) => {
-                  const isSelected = selectedGarment?.id === g.id;
+                  const isCurrent =
+                    pickerSlot === "top"
+                      ? selectedTop?.id === g.id
+                      : selectedBottom?.id === g.id;
+
                   return (
                     <div
                       key={g.id}
                       onClick={() => {
-                        setSelectedGarment(g);
+                        if (pickerSlot === "top") {
+                          setSelectedTop(g);
+                        } else {
+                          setSelectedBottom(g);
+                        }
                         setIsGarmentPickerOpen(false);
                       }}
                       className={clsx(
-                        "cursor-pointer rounded-2xl border p-2 transition-all",
-                        isSelected
-                          ? "border-ink bg-bone-deep ring-2 ring-ink"
+                        "cursor-pointer rounded-2xl border p-2 transition-all group",
+                        isCurrent
+                          ? "border-flame bg-flame/5 ring-2 ring-flame"
                           : "border-line bg-bone hover:border-ink/50"
                       )}
                     >
@@ -930,14 +1359,22 @@ function TryOnContent() {
                         <img
                           src={g.image}
                           alt={g.name}
-                          className="h-full w-full object-cover"
+                          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-102"
                         />
                         <span className="absolute bottom-1.5 left-1.5 rounded-full bg-ink/80 px-2 py-0.5 text-[9px] font-mono text-bone uppercase">
                           {g.category}
                         </span>
+                        {isCurrent && (
+                          <span className="absolute top-1.5 right-1.5 rounded-full bg-flame text-white p-1 shadow-md">
+                            <Check className="h-3 w-3 stroke-[3]" />
+                          </span>
+                        )}
                       </div>
                       <p className="mt-1.5 text-xs font-semibold text-ink truncate px-1">
                         {g.name}
+                      </p>
+                      <p className="text-[10px] text-ink-soft truncate px-1">
+                        {g.color || g.type || "Catalog piece"}
                       </p>
                     </div>
                   );

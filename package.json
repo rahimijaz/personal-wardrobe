@@ -1,10 +1,11 @@
 {
-  "name": "nextjs-postgresql-template",
+  "name": "fitcheck-wardrobe-studio",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
     "build": "next build",
     "start": "next start",
+    "start:all": "powershell -ExecutionPolicy Bypass -File ./start.ps1",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },

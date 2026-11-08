@@ -18,6 +18,8 @@ import {
   Star,
   ArrowUpRight,
   ChevronRight,
+  Compass,
+  Palette,
 } from "lucide-react";
 import { useWardrobe } from "@/context/wardrobe-context";
 import { CATEGORIES, CATEGORY_LABEL, type GarmentCategory } from "@/lib/types";
@@ -60,23 +62,19 @@ export default function DashboardPage() {
         {/* Decorative mesh */}
         <div className="absolute inset-0 mesh-pattern pointer-events-none" />
 
-        {/* Floating decorative circles */}
-        <div className="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-flame/5 blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-16 left-1/3 h-48 w-48 rounded-full bg-sage/8 blur-2xl pointer-events-none" />
-
         <div className="relative z-10 mx-auto max-w-7xl px-6 sm:px-8 md:px-10 py-10 sm:py-12">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
             {/* Left: Headline + CTAs */}
             <div className="max-w-2xl">
-              {/* Privacy badge */}
+              {/* Studio badge */}
               <motion.div
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.4 }}
-                className="inline-flex items-center gap-2 rounded-full border border-emerald-600/20 dark:border-emerald-500/30 bg-emerald-500/10 dark:bg-emerald-500/15 px-3.5 py-1.5 text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 mb-5"
+                className="inline-flex items-center gap-2 rounded-full border border-line bg-bone-deep/50 px-3.5 py-1.5 text-[11px] font-semibold text-ink mb-5 shadow-xs"
               >
-                <ShieldCheck className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-                <span>Private Studio · All inference runs on your device</span>
+                <Sparkles className="h-3.5 w-3.5 text-flame" />
+                <span>Digital Wardrobe &amp; Styling Studio</span>
               </motion.div>
 
               <motion.h1
@@ -85,9 +83,9 @@ export default function DashboardPage() {
                 transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
                 className="font-display text-4xl sm:text-5xl md:text-[3.5rem] font-bold tracking-tight text-ink leading-[1.08]"
               >
-                Your Private Wardrobe
+                Your Digital Wardrobe
                 <br />
-                <span className="gradient-text">&amp; AI Try-On Studio.</span>
+                <span className="gradient-text">&amp; Styling Studio.</span>
               </motion.h1>
 
               <motion.p
@@ -96,8 +94,8 @@ export default function DashboardPage() {
                 transition={{ delay: 0.1, duration: 0.45 }}
                 className="mt-5 text-base sm:text-lg text-ink-soft leading-relaxed max-w-xl"
               >
-                Organize your clothing locally, choose your persona, and render
-                photorealistic try-on looks with on-device FASHN-VTON diffusion.
+                Organize your real-world collection, curate personalized styles, and render
+                photorealistic try-on looks with precision detail.
               </motion.p>
 
               {/* Stats row */}
@@ -152,6 +150,14 @@ export default function DashboardPage() {
                   <Sparkles className="h-4 w-4 text-flame" />
                   <span>Create a Look</span>
                   <ArrowRight className="h-4 w-4" />
+                </Link>
+
+                <Link
+                  href="/harmony"
+                  className="inline-flex items-center gap-2 rounded-full border border-line bg-paper/90 backdrop-blur-sm px-5 py-3.5 text-sm font-semibold text-ink shadow-sm transition-all duration-200 hover:border-flame/50 hover:bg-bone-deep hover:scale-[1.02]"
+                >
+                  <Palette className="h-4 w-4 text-flame" />
+                  <span>Color Wheel</span>
                 </Link>
 
                 <Link
@@ -411,8 +417,8 @@ export default function DashboardPage() {
           >
             <div className="flex items-center justify-between mb-5">
               <div>
-                <h2 className="font-display text-2xl sm:text-3xl font-bold text-ink">Recent AI Looks</h2>
-                <p className="text-xs text-ink-soft mt-0.5">Saved outfits generated with local FASHN-VTON</p>
+                <h2 className="font-display text-2xl sm:text-3xl font-bold text-ink">Recent Styled Looks</h2>
+                <p className="text-xs text-ink-soft mt-0.5">Curated outfits styled in your digital studio</p>
               </div>
               <Link
                 href="/outfits"
@@ -442,7 +448,7 @@ export default function DashboardPage() {
                     <div className="absolute top-3 left-3">
                       <span className="badge-flame">
                         <Sparkles className="h-2.5 w-2.5" />
-                        AI Generated
+                        Styled Look
                       </span>
                     </div>
                     <span className="absolute bottom-3 left-3 rounded-full bg-ink/80 px-2.5 py-1 text-[11px] font-mono text-bone backdrop-blur-md">
@@ -479,15 +485,24 @@ export default function DashboardPage() {
         >
           <h2 className="font-display text-2xl sm:text-3xl font-bold text-ink mb-5">Quick Actions</h2>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {[
+              {
+                href: "/match",
+                icon: Compass,
+                iconColor: "text-flame",
+                iconBg: "bg-flame/10",
+                title: "Fit Recommender",
+                desc: "Discover matching tops and bottoms paired with color harmony.",
+                cta: "Explore Fits",
+              },
               {
                 href: "/try-on",
                 icon: Sparkles,
-                iconColor: "text-flame",
-                iconBg: "bg-flame/10",
+                iconColor: "text-amber-600 dark:text-amber-400",
+                iconBg: "bg-amber-500/10",
                 title: "Virtual Try-On",
-                desc: "Render photorealistic try-on looks using local AI diffusion.",
+                desc: "Try on tops, bottoms, and complete outfits in real time.",
                 cta: "Open Studio",
               },
               {
@@ -505,7 +520,7 @@ export default function DashboardPage() {
                 iconColor: "text-sage",
                 iconBg: "bg-sage/15",
                 title: "Saved Outfits",
-                desc: "View your gallery of AI-generated try-on looks and saved styles.",
+                desc: "View your gallery of styled looks and outfit archives.",
                 cta: "View Gallery",
               },
             ].map((item, i) => {
@@ -550,10 +565,10 @@ export default function DashboardPage() {
             </div>
             <div>
               <h4 className="text-sm font-semibold text-ink">
-                {engineStatus?.online ? "VTON Engine Active" : "Local Hardware Ready"}
+                {engineStatus?.online ? "Studio Engine Online" : "Studio Ready"}
               </h4>
               <p className="text-[11px] text-ink-soft">
-                {engineStatus?.message || "Connected to local DirectML pipeline."}
+                {engineStatus?.online ? "Connected and ready for try-on styling." : "Local styling studio ready."}
               </p>
             </div>
           </div>
@@ -562,7 +577,7 @@ export default function DashboardPage() {
             href="/settings"
             className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-soft hover:text-ink transition-colors"
           >
-            <span>Engine Diagnostics</span>
+            <span>Studio Settings</span>
             <ExternalLink className="h-3.5 w-3.5" />
           </Link>
         </motion.div>

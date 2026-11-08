@@ -74,6 +74,52 @@ def _encode_png(image) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
+# ---------------------------------------------------------------------------
+# Background Removal (RMBG-1.4 for clean garment cutouts)
+# ---------------------------------------------------------------------------
+_RMBG_MODEL = None
+_RMBG_LOCK = threading.Lock()
+
+
+def _get_rmbg_model():
+    global _RMBG_MODEL
+    if _RMBG_MODEL is None:
+        with _RMBG_LOCK:
+            if _RMBG_MODEL is None:
+                from transformers import AutoModelForImageSegmentation
+                print("[RMBG] Loading RMBG-1.4 background removal model...")
+                model = AutoModelForImageSegmentation.from_pretrained("briaai/RMBG-1.4", trust_remote_code=True)
+                model.eval()
+                _RMBG_MODEL = model
+                print("[RMBG] RMBG-1.4 ready.")
+    return _RMBG_MODEL
+
+
+def _process_background_removal(pil_img):
+    """Takes a PIL image and returns an RGBA PIL image with the background cleanly removed."""
+    import torch
+    import torchvision.transforms as transforms
+    import torchvision.transforms.functional as F
+    from PIL import Image
+
+    model = _get_rmbg_model()
+    orig_size = pil_img.size
+    input_img = pil_img.convert("RGB").resize((1024, 1024), Image.BILINEAR)
+    tensor = F.to_tensor(input_img).unsqueeze(0)
+    tensor = F.normalize(tensor, [0.5, 0.5, 0.5], [1.0, 1.0, 1.0])
+
+    with torch.no_grad():
+        out = model(tensor)
+        pred_tensor = out[0][0]
+        pred = pred_tensor.sigmoid().cpu().squeeze()
+
+    pred_pil = transforms.ToPILImage()(pred).resize(orig_size, Image.BILINEAR)
+    result = pil_img.convert("RGBA")
+    result.putalpha(pred_pil)
+    return result
+
+
+
 def _worker_loop():
     """Background worker processing VTON jobs one-by-one."""
     while True:
@@ -94,11 +140,14 @@ def _worker_loop():
                 continue
             job["status"] = "processing"
             job["stage"] = "preparing_person"
-            total_steps = int(job["params"].get("num_timesteps") or 8)
-            job["total_steps"] = total_steps
-            job["logs"] = [f"[{time.strftime('%H:%M:%S')}] Job initialized, preparing DirectML environment..."]
+            garments_list = job["params"].get("garments", [])
+            num_passes = max(1, len(garments_list))
+            pass_steps = int(job["params"].get("num_timesteps") or 8)
+            overall_total_steps = pass_steps * num_passes
+            job["total_steps"] = overall_total_steps
+            job["logs"] = [f"[{time.strftime('%H:%M:%S')}] Job initialized ({num_passes} pass{'es' if num_passes > 1 else ''} • {overall_total_steps} total steps), preparing DirectML environment..."]
 
-        def update_stage(new_stage: str, step: int = 0, total_steps: int = total_steps, detail: str = "", **kwargs):
+        def update_stage(new_stage: str, step: int = 0, total_steps: int = overall_total_steps, detail: str = "", **kwargs):
             with _JOBS_LOCK:
                 if job_id in _JOBS:
                     j = _JOBS[job_id]
@@ -109,16 +158,18 @@ def _worker_loop():
                     j["sec_per_it"] = kwargs.get("sec_per_it", 0.0)
                     j["elapsed_sec"] = kwargs.get("elapsed_sec", 0.0)
                     j["eta_sec"] = kwargs.get("eta_sec", 0.0)
-                    j["percent"] = kwargs.get("percent", 0)
+                    pct = kwargs.get("percent")
+                    if pct is None:
+                        pct = int(min(100, max(0, (step / max(1, total_steps)) * 100)))
+                    j["percent"] = pct
 
                     now_str = time.strftime('%H:%M:%S')
                     logs = j.setdefault("logs", [])
                     if new_stage == "generating" and step > 0:
-                        pct = kwargs.get("percent", 0)
                         spi = kwargs.get("sec_per_it", 0.0)
                         ela = kwargs.get("elapsed_sec", 0.0)
                         eta = kwargs.get("eta_sec", 0.0)
-                        filled = "#" * step
+                        filled = "#" * min(step, total_steps)
                         empty = "-" * max(0, total_steps - step)
                         line = f"[{now_str}] Sampling: {pct:3d}%|{filled}{empty}| {step}/{total_steps} [{int(ela)//60:02d}:{int(ela)%60:02d}<{int(eta)//60:02d}:{int(eta)%60:02d}, {spi:.2f}s/it]"
                         logs.append(line)
@@ -126,44 +177,84 @@ def _worker_loop():
                         logs.append(f"[{now_str}] {detail}")
 
         try:
-            person = _decode_image(job["params"]["person"], "person")
-            garment = _decode_image(job["params"]["garment"], "garment")
-            category = job["params"].get("category", "tops")
-            photo_type = job["params"].get("garment_photo_type", "flat-lay")
+            person_img = _decode_image(job["params"]["person"], "person")
             num_timesteps = job["params"].get("num_timesteps")
             skip_cfg = job["params"].get("skip_cfg_last_n_steps")
             guidance = job["params"].get("guidance_scale")
             seed = job["params"].get("seed")
 
-            if HAS_FASHN and FASHN_RUNNER:
-                result_img = FASHN_RUNNER.run_tryon(
-                    person_image=person,
-                    garment_image=garment,
-                    category=category,
-                    garment_photo_type=photo_type,
-                    num_timesteps=num_timesteps,
-                    skip_cfg_last_n_steps=skip_cfg,
-                    guidance_scale=guidance,
-                    seed=seed,
-                    on_stage_change=update_stage,
-                )
-            else:
-                # Fallback / mock stage simulation if weights missing
-                update_stage("preparing_garment")
-                time.sleep(2.0)
-                update_stage("generating")
-                time.sleep(4.0)
-                update_stage("finalizing")
-                time.sleep(1.0)
-                result_img = person
+            current_img = person_img
 
-            png_b64 = _encode_png(result_img)
+            for pass_idx, g_item in enumerate(garments_list, start=1):
+                with _JOBS_LOCK:
+                    if _JOBS.get(job_id, {}).get("status") == "cancelled":
+                        raise InterruptedError("Job was cancelled by user.")
+
+                g_img = _decode_image(g_item["garment"], f"garment_pass_{pass_idx}")
+                g_cat = g_item.get("category", "tops")
+                g_type = g_item.get("garment_photo_type", "flat-lay")
+                step_offset = (pass_idx - 1) * pass_steps
+
+                pass_prefix = f"Pass {pass_idx}/{num_passes} ({g_cat.title()})"
+                update_stage("preparing_person", step=step_offset, total_steps=overall_total_steps, detail=f"[{pass_prefix}] Detecting pose & parsing human keypoints...")
+
+                def make_pass_callback(p_prefix, p_offset, p_cat):
+                    def _cb(stage: str = "generating", step: int = 0, total_steps: int = pass_steps, detail: str = "", **kwargs):
+                        with _JOBS_LOCK:
+                            if _JOBS.get(job_id, {}).get("status") == "cancelled":
+                                raise InterruptedError("Job was cancelled by user.")
+                        cur_step = p_offset + step
+                        pct = int(min(100, max(0, (cur_step / overall_total_steps) * 100)))
+                        sub_detail = f"[{p_prefix}] {detail}" if detail else f"[{p_prefix}] Processing {p_cat}..."
+                        update_stage(stage, step=cur_step, total_steps=overall_total_steps, detail=sub_detail, percent=pct, **kwargs)
+                    return _cb
+
+                pass_cb = make_pass_callback(pass_prefix, step_offset, g_cat)
+
+                if HAS_FASHN and FASHN_RUNNER:
+                    current_img = FASHN_RUNNER.run_tryon(
+                        person_image=current_img,
+                        garment_image=g_img,
+                        category=g_cat,
+                        garment_photo_type=g_type,
+                        num_timesteps=pass_steps,
+                        skip_cfg_last_n_steps=skip_cfg,
+                        guidance_scale=guidance,
+                        seed=seed,
+                        on_stage_change=pass_cb,
+                    )
+                else:
+                    # Fallback / mock stage simulation if weights missing
+                    update_stage("preparing_garment", step=step_offset, total_steps=overall_total_steps, detail=f"[{pass_prefix}] Segmenting clothing boundaries...")
+                    time.sleep(1.0)
+                    for s in range(1, pass_steps + 1):
+                        time.sleep(0.4)
+                        pass_cb(stage="generating", step=s, detail=f"Euler Timestep {s}/{pass_steps}")
+                    update_stage("finalizing", step=step_offset + pass_steps, total_steps=overall_total_steps, detail=f"[{pass_prefix}] Pass complete.")
+                    time.sleep(0.5)
+
+                if num_passes > 1 and pass_idx < num_passes:
+                    update_stage("generating", step=pass_idx * pass_steps, total_steps=overall_total_steps, detail=f"[Pass {pass_idx}/{num_passes} Complete] {g_cat.title()} applied. Proceeding to {garments_list[pass_idx].get('category', 'bottoms').title()}...")
+
+            update_stage("finalizing", step=overall_total_steps, total_steps=overall_total_steps, detail="Finalizing high-resolution composite result...")
+            png_b64 = _encode_png(current_img)
 
             with _JOBS_LOCK:
                 if job_id in _JOBS:
                     _JOBS[job_id]["status"] = "completed"
                     _JOBS[job_id]["stage"] = "completed"
+                    _JOBS[job_id]["step"] = overall_total_steps
+                    _JOBS[job_id]["total_steps"] = overall_total_steps
                     _JOBS[job_id]["image"] = png_b64
+                    _JOBS[job_id]["completed_at"] = time.time()
+
+        except InterruptedError:
+            print(f"[{time.strftime('%H:%M:%S')}] Job {job_id} cancelled by user.")
+            with _JOBS_LOCK:
+                if job_id in _JOBS:
+                    _JOBS[job_id]["status"] = "cancelled"
+                    _JOBS[job_id]["stage"] = "cancelled"
+                    _JOBS[job_id]["error"] = "Job cancelled by user."
                     _JOBS[job_id]["completed_at"] = time.time()
 
         except Exception as exc:
@@ -187,7 +278,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
         self.wfile.write(body)
@@ -195,9 +286,25 @@ class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
+
+    def do_DELETE(self):
+        if self.path.startswith("/try-on/jobs/"):
+            job_id = self.path.split("/try-on/jobs/")[-1].replace("/cancel", "").strip()
+            with _JOBS_LOCK:
+                if job_id in _JOBS:
+                    _JOBS[job_id]["status"] = "cancelled"
+                    _JOBS[job_id]["stage"] = "cancelled"
+                    _JOBS[job_id]["error"] = "Job cancelled by user."
+                    if job_id in _JOB_QUEUE:
+                        _JOB_QUEUE.remove(job_id)
+                    self._send_json(200, {"success": True, "message": f"Job {job_id} cancelled."})
+                    return
+            self._send_json(404, {"error": "Job not found"})
+            return
+        self._send_json(404, {"error": "Not found"})
 
     def do_GET(self):
         if self.path == "/health":
@@ -244,6 +351,20 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(404, {"error": "Not found"})
 
     def do_POST(self):
+        if "/try-on/jobs/" in self.path and self.path.endswith("/cancel"):
+            job_id = self.path.split("/try-on/jobs/")[1].replace("/cancel", "").strip()
+            with _JOBS_LOCK:
+                if job_id in _JOBS:
+                    _JOBS[job_id]["status"] = "cancelled"
+                    _JOBS[job_id]["stage"] = "cancelled"
+                    _JOBS[job_id]["error"] = "Job cancelled by user."
+                    if job_id in _JOB_QUEUE:
+                        _JOB_QUEUE.remove(job_id)
+                    self._send_json(200, {"success": True, "message": f"Job {job_id} cancelled."})
+                    return
+            self._send_json(404, {"error": "Job not found"})
+            return
+
         content_len = int(self.headers.get("Content-Length", 0))
         if content_len > MAX_BODY_BYTES:
             self._send_json(413, {"error": "Payload exceeds max allowed size."})
@@ -258,23 +379,39 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path == "/try-on/async":
             person = body.get("person")
-            garment = body.get("garment")
-            category = body.get("category", "tops")
-            photo_type = body.get("garment_photo_type", "flat-lay")
             num_timesteps = body.get("num_timesteps")
             skip_cfg = body.get("skip_cfg_last_n_steps")
             guidance = body.get("guidance_scale")
             seed = body.get("seed")
             device = body.get("device")
 
-            if not person or not garment:
-                self._send_json(400, {"error": "Both 'person' and 'garment' base64 strings required."})
+            # Support garments array or single garment
+            garments_list = []
+            if "garments" in body and isinstance(body["garments"], list) and len(body["garments"]) > 0:
+                for g_item in body["garments"]:
+                    if g_item.get("garment"):
+                        garments_list.append({
+                            "garment": g_item["garment"],
+                            "category": g_item.get("category", "tops"),
+                            "garment_photo_type": g_item.get("garment_photo_type", "flat-lay"),
+                        })
+            elif body.get("garment"):
+                garments_list.append({
+                    "garment": body["garment"],
+                    "category": body.get("category", "tops"),
+                    "garment_photo_type": body.get("garment_photo_type", "flat-lay"),
+                })
+
+            if not person or not garments_list:
+                self._send_json(400, {"error": "Both 'person' and at least one 'garment' required."})
                 return
 
             try:
                 parsed_steps = int(num_timesteps) if num_timesteps is not None else 8
             except (ValueError, TypeError):
                 parsed_steps = 8
+
+            overall_total_steps = parsed_steps * len(garments_list)
 
             job_id = str(uuid.uuid4())
             with _JOBS_LOCK:
@@ -283,12 +420,13 @@ class Handler(BaseHTTPRequestHandler):
                     "status": "queued",
                     "stage": "queued",
                     "step": 0,
-                    "total_steps": parsed_steps,
+                    "total_steps": overall_total_steps,
                     "params": {
                         "person": person,
-                        "garment": garment,
-                        "category": category,
-                        "garment_photo_type": photo_type,
+                        "garments": garments_list,
+                        # Also keep top-level for convenience
+                        "category": garments_list[0].get("category", "tops"),
+                        "garment_photo_type": garments_list[0].get("garment_photo_type", "flat-lay"),
                         "num_timesteps": parsed_steps,
                         "skip_cfg_last_n_steps": skip_cfg,
                         "guidance_scale": guidance,
@@ -300,7 +438,27 @@ class Handler(BaseHTTPRequestHandler):
                 _JOB_QUEUE.append(job_id)
                 _QUEUE_EVENT.set()
 
-            self._send_json(202, {"jobId": job_id, "status": "queued"})
+            self._send_json(202, {"jobId": job_id, "status": "queued", "total_steps": overall_total_steps})
+            return
+
+        if self.path == "/remove-background":
+            raw_image = body.get("image")
+            if not raw_image:
+                self._send_json(400, {"error": "'image' base64 string required."})
+                return
+
+            try:
+                pil_img = _decode_image(raw_image, "image")
+                cutout_img = _process_background_removal(pil_img)
+                cutout_b64 = _encode_png(cutout_img)
+                self._send_json(200, {
+                    "image": f"data:image/png;base64,{cutout_b64}",
+                    "width": cutout_img.width,
+                    "height": cutout_img.height,
+                })
+            except Exception as e:
+                traceback.print_exc()
+                self._send_json(500, {"error": f"Background removal failed: {str(e)}"})
             return
 
         self._send_json(404, {"error": "Endpoint not recognized"})

@@ -7,7 +7,8 @@ import {
   saveVtonJob,
   getVtonJobById,
 } from "./storage";
-import type { VtonJob, VtonCategory, GarmentPhotoType, InferenceParameters } from "@/lib/types";
+import { applyCalibrationFraming } from "./images";
+import type { VtonJob, VtonCategory, GarmentPhotoType, InferenceParameters, Garment } from "@/lib/types";
 
 const VTON_SERVICE_URL =
   process.env.VTON_SERVICE_URL || "http://127.0.0.1:8188";
@@ -101,8 +102,47 @@ function resolveImageBuffer(imagePath: string): Buffer {
   return Buffer.alloc(0);
 }
 
-// Background simulation for asynchronous execution if Python daemon is not actively running
+// Background execution tracking
+const activePollingIntervals = new Map<string, NodeJS.Timeout>();
+const activePythonJobIds = new Map<string, string>();
 const activeSimulationTimeouts = new Map<string, NodeJS.Timeout>();
+
+export async function cancelTryOnJob(localJobId: string): Promise<boolean> {
+  // Clear local polling
+  const interval = activePollingIntervals.get(localJobId);
+  if (interval) {
+    clearInterval(interval);
+    activePollingIntervals.delete(localJobId);
+  }
+
+  const existing = getVtonJobById(localJobId);
+  if (existing) {
+    existing.status = "failed";
+    existing.stage = "cancelled" as any;
+    existing.error = "Generation cancelled by user.";
+    saveVtonJob(existing);
+  }
+
+  // Notify Python service to abort inference
+  const pythonJobId = activePythonJobIds.get(localJobId) || localJobId;
+  activePythonJobIds.delete(localJobId);
+
+  try {
+    await fetch(`${VTON_SERVICE_URL}/try-on/jobs/${pythonJobId}`, {
+      method: "DELETE",
+      signal: AbortSignal.timeout(3000),
+    });
+  } catch {
+    try {
+      await fetch(`${VTON_SERVICE_URL}/try-on/jobs/${pythonJobId}/cancel`, {
+        method: "POST",
+        signal: AbortSignal.timeout(3000),
+      });
+    } catch {}
+  }
+
+  return true;
+}
 
 export async function submitTryOnJob({
   personId,
@@ -110,27 +150,45 @@ export async function submitTryOnJob({
   category,
   garmentPhotoType,
   params,
+  garmentIds,
 }: {
   personId: string;
-  garmentId: string;
-  category: VtonCategory;
-  garmentPhotoType: GarmentPhotoType;
+  garmentId?: string;
+  garmentIds?: string[];
+  category?: VtonCategory;
+  garmentPhotoType?: GarmentPhotoType;
   params?: Partial<InferenceParameters>;
 }): Promise<VtonJob> {
   const person = getPersonById(personId);
-  const garment = getGarmentById(garmentId);
-
   if (!person) throw new Error("Person profile not found");
-  if (!garment) throw new Error("Garment not found");
 
-  const totalSteps = params?.numTimesteps ?? 8;
+  const idsToResolve = garmentIds && garmentIds.length > 0 ? garmentIds : (garmentId ? [garmentId] : []);
+  const resolvedGarments = idsToResolve
+    .map((id) => getGarmentById(id))
+    .filter(Boolean) as Garment[];
+
+  if (resolvedGarments.length === 0) {
+    throw new Error("No valid garments selected for try-on");
+  }
+
+  // Ensure logical ordering: tops -> one-pieces -> bottoms
+  const orderWeight: Record<string, number> = { tops: 1, "one-pieces": 2, bottoms: 3 };
+  resolvedGarments.sort(
+    (a, b) => (orderWeight[a.category] || 99) - (orderWeight[b.category] || 99)
+  );
+
+  const singlePassSteps = params?.numTimesteps ?? 8;
+  const totalSteps = singlePassSteps * resolvedGarments.length;
+  const primaryCategory = (resolvedGarments[0].category as VtonCategory) || category || "tops";
+  const primaryPhotoType = (resolvedGarments[0].photoType as GarmentPhotoType) || garmentPhotoType || "flat-lay";
+
   const jobId = `job-${crypto.randomUUID()}`;
   const job: VtonJob = {
     id: jobId,
     personId: person.id,
-    garmentIds: [garment.id],
-    category,
-    garmentPhotoType,
+    garmentIds: resolvedGarments.map((g) => g.id),
+    category: primaryCategory,
+    garmentPhotoType: primaryPhotoType,
     status: "processing",
     stage: "preparing_person",
     result: null,
@@ -139,7 +197,7 @@ export async function submitTryOnJob({
     params,
     createdAt: new Date().toISOString(),
     person,
-    garments: [garment],
+    garments: resolvedGarments,
   };
 
   saveVtonJob(job);
@@ -148,22 +206,32 @@ export async function submitTryOnJob({
   let submittedToPython = false;
   let connectionError = "";
   try {
-    const personBuf = resolveImageBuffer(person.image);
-    const garmentBuf = resolveImageBuffer(garment.image);
-
+    let personBuf = resolveImageBuffer(person.image);
     if (personBuf.length === 0) {
       throw new Error(`Person image could not be loaded from '${person.image}'`);
     }
-    if (garmentBuf.length === 0) {
-      throw new Error(`Garment image could not be loaded from '${garment.image}'`);
+
+    // Apply persona calibration framing (zoom, X/Y offsets)
+    if (person.calibration) {
+      personBuf = await applyCalibrationFraming(personBuf, person.calibration);
     }
+
+    const garmentsPayload = resolvedGarments.map((g) => {
+      const gBuf = resolveImageBuffer(g.image);
+      if (gBuf.length === 0) {
+        throw new Error(`Garment image could not be loaded from '${g.image}'`);
+      }
+      return {
+        garment: gBuf.toString("base64"),
+        category: (["tops", "bottoms", "one-pieces"].includes(g.category) ? g.category : "tops") as VtonCategory,
+        garment_photo_type: g.photoType || "flat-lay",
+      };
+    });
 
     const payload = {
       person: personBuf.toString("base64"),
-      garment: garmentBuf.toString("base64"),
-      category,
-      garment_photo_type: garmentPhotoType,
-      num_timesteps: params?.numTimesteps ?? 8,
+      garments: garmentsPayload,
+      num_timesteps: singlePassSteps,
       skip_cfg_last_n_steps: params?.skipCfgLastNSteps ?? 5,
       guidance_scale: params?.guidanceScale ?? 2.0,
       seed: params?.randomSeed ? Math.floor(Math.random() * 1000000) : (params?.seed ?? 42),
@@ -204,10 +272,18 @@ async function pollPythonJob(localJobId: string, pythonJobId: string) {
   let attempts = 0;
   const maxAttempts = 900; // 15 minutes timeout limit for DirectML GPU generation
 
+  activePythonJobIds.set(localJobId, pythonJobId);
+
+  const cleanup = () => {
+    activePollingIntervals.delete(localJobId);
+    activePythonJobIds.delete(localJobId);
+  };
+
   const interval = setInterval(async () => {
     attempts++;
     if (attempts > maxAttempts) {
       clearInterval(interval);
+      cleanup();
       const existing = getVtonJobById(localJobId);
       if (existing && existing.status === "processing") {
         existing.status = "failed";
@@ -224,6 +300,7 @@ async function pollPythonJob(localJobId: string, pythonJobId: string) {
         const existing = getVtonJobById(localJobId);
         if (!existing) {
           clearInterval(interval);
+          cleanup();
           return;
         }
 
@@ -257,13 +334,30 @@ async function pollPythonJob(localJobId: string, pythonJobId: string) {
 
         if (pyJob.status === "completed") {
           clearInterval(interval);
+          cleanup();
           existing.status = "completed";
           existing.stage = "completed";
-          existing.result = `data:image/png;base64,${pyJob.image}`;
+
+          // Write image to file instead of storing base64 in JSON
+          const tryonDir = path.join(process.cwd(), "public", "uploads", "tryon");
+          fs.mkdirSync(tryonDir, { recursive: true });
+          const imgBuffer = Buffer.from(pyJob.image, "base64");
+          const imgPath = path.join(tryonDir, `${localJobId}.png`);
+          fs.writeFileSync(imgPath, imgBuffer);
+          existing.result = `/uploads/tryon/${localJobId}.png`;
+
           existing.completedAt = new Date().toISOString();
+          saveVtonJob(existing);
+        } else if (pyJob.status === "cancelled") {
+          clearInterval(interval);
+          cleanup();
+          existing.status = "failed";
+          existing.stage = "cancelled" as any;
+          existing.error = "Generation was cancelled by user.";
           saveVtonJob(existing);
         } else if (pyJob.status === "failed") {
           clearInterval(interval);
+          cleanup();
           existing.status = "failed";
           existing.error = pyJob.error || "Generation failed on local VTON engine.";
           saveVtonJob(existing);
@@ -275,6 +369,8 @@ async function pollPythonJob(localJobId: string, pythonJobId: string) {
       // Continue polling
     }
   }, 1000);
+
+  activePollingIntervals.set(localJobId, interval);
 }
 
 function runAsyncJobSimulation(

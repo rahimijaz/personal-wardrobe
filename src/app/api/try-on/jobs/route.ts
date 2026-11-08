@@ -13,26 +13,33 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { personId, garmentId, category, garmentPhotoType, params } = body;
+    const { personId, garmentId, garmentIds, category, garmentPhotoType, params } = body;
 
-    if (!personId || !garmentId) {
+    const ids: string[] = [];
+    if (Array.isArray(garmentIds) && garmentIds.length > 0) {
+      ids.push(...garmentIds.filter(Boolean));
+    } else if (garmentId) {
+      ids.push(garmentId);
+    }
+
+    if (!personId || ids.length === 0) {
       return NextResponse.json(
-        { error: "personId and garmentId are required" },
+        { error: "personId and at least one garment (top or bottom) are required" },
         { status: 400 }
       );
     }
 
-    const validCategory = (["tops", "bottoms", "one-pieces"].includes(category)
+    const validCategory = (category && ["tops", "bottoms", "one-pieces"].includes(category)
       ? category
       : "tops") as VtonCategory;
 
-    const validPhotoType = (["flat-lay", "model"].includes(garmentPhotoType)
+    const validPhotoType = (garmentPhotoType && ["flat-lay", "model"].includes(garmentPhotoType)
       ? garmentPhotoType
       : "flat-lay") as GarmentPhotoType;
 
     const job = await submitTryOnJob({
       personId,
-      garmentId,
+      garmentIds: ids,
       category: validCategory,
       garmentPhotoType: validPhotoType,
       params,

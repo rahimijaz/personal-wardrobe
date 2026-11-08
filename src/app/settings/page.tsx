@@ -439,18 +439,18 @@ export default function SettingsPage() {
             </div>
             <div>
               <h2 className="font-display text-lg font-bold text-ink">
-                100% Local Privacy Guarantee
+                Private Studio Guarantee
               </h2>
               <p className="text-xs text-ink-soft">
-                Private by design • No cloud dependencies
+                Private by design • Stored directly on your personal machine
               </p>
             </div>
           </div>
 
           <p className="text-xs sm:text-sm text-ink-soft leading-relaxed">
-            Personal Wardrobe runs completely on your local device. Your clothing photographs,
-            person reference photos, and synthesized virtual try-on images are stored on your
-            local disk in this repository and are never transmitted to any third-party clouds or external AI APIs.
+            Personal Wardrobe keeps your private collection confidential. Your clothing photographs,
+            person reference photos, and styled try-on looks remain stored on your local disk
+            and are never shared with third-party cloud services or external data brokers.
           </p>
 
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
