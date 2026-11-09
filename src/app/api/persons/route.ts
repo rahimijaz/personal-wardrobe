@@ -5,6 +5,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import sharp from "sharp";
 import { detectBodySilhouetteFromPixels } from "@/lib/persona-utils";
+import { autoFramePersonaBuffer } from "@/server/images";
 
 export const dynamic = "force-dynamic";
 
@@ -36,15 +37,19 @@ export async function POST(req: Request) {
 
       const file = formData.get("image");
       if (file instanceof File) {
-        const buffer = Buffer.from(await file.arrayBuffer());
+        const rawBuffer = Buffer.from(await file.arrayBuffer());
         const uploadsDir = path.join(process.cwd(), "public", "uploads");
         if (!fs.existsSync(uploadsDir)) {
           fs.mkdirSync(uploadsDir, { recursive: true });
         }
-        const ext = file.name.split(".").pop() || "png";
-        const fileName = `person-${crypto.randomUUID()}.${ext}`;
+
+        // Auto-frame person into standard 2:3 VTON portrait frame (1024x1536)
+        // so head, hair, arms, and shoes are never cut off
+        const framedBuffer = await autoFramePersonaBuffer(rawBuffer);
+
+        const fileName = `person-${crypto.randomUUID()}.png`;
         const filePath = path.join(uploadsDir, fileName);
-        fs.writeFileSync(filePath, buffer);
+        fs.writeFileSync(filePath, framedBuffer);
         image = `/uploads/${fileName}`;
 
         // Auto-detect silhouette if not provided
@@ -76,15 +81,18 @@ export async function POST(req: Request) {
         try {
           const matches = image.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
           if (matches) {
-            const ext = matches[1] === "jpeg" ? "jpg" : matches[1];
-            const buffer = Buffer.from(matches[2], "base64");
+            const rawBuffer = Buffer.from(matches[2], "base64");
             const uploadsDir = path.join(process.cwd(), "public", "uploads");
             if (!fs.existsSync(uploadsDir)) {
               fs.mkdirSync(uploadsDir, { recursive: true });
             }
-            const fileName = `person-${crypto.randomUUID()}.${ext}`;
+
+            // Auto-frame person into standard 2:3 VTON portrait frame (1024x1536)
+            const framedBuffer = await autoFramePersonaBuffer(rawBuffer);
+
+            const fileName = `person-${crypto.randomUUID()}.png`;
             const filePath = path.join(uploadsDir, fileName);
-            fs.writeFileSync(filePath, buffer);
+            fs.writeFileSync(filePath, framedBuffer);
             image = `/uploads/${fileName}`;
 
             if (!calibration?.bodySilhouette) {

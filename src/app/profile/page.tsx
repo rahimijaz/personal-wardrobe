@@ -28,6 +28,8 @@ import {
   Sun,
   Flame,
   Layers,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import clsx from "clsx";
 import { useWardrobe } from "@/context/wardrobe-context";
@@ -41,7 +43,11 @@ import type {
   PersonaFraming,
   PersonaLighting,
 } from "@/lib/types";
-import { detectBodySilhouetteFromImageSrc } from "@/lib/persona-utils";
+import {
+  detectBodySilhouetteFromImageSrc,
+  detectAutoFitFramingFromImageSrc,
+} from "@/lib/persona-utils";
+import { Wand2 } from "lucide-react";
 
 function ProfilePageContent() {
   const searchParams = useSearchParams();
@@ -155,11 +161,155 @@ function ProfilePageContent() {
     return Math.min(100, Math.max(50, score));
   }, [posture, framing, lighting]);
 
+  // Dynamic guidelines reacting to height and posture
+  const crownTopPct = useMemo(() => {
+    const clamped = Math.max(145, Math.min(210, heightCm));
+    return 18.5 - ((clamped - 145) / 65) * 9.5; // 145cm -> 18.5%, 175cm -> 14%, 210cm -> 9%
+  }, [heightCm]);
+
+  const groundBottomPct = useMemo(() => {
+    const clamped = Math.max(145, Math.min(210, heightCm));
+    return 12 - ((clamped - 145) / 65) * 6.5; // 145cm -> 12% (ground at 88%), 175cm -> 8.5% (91.5%), 210cm -> 5.5% (94.5%)
+  }, [heightCm]);
+
+  const shoulderTopPct = useMemo(() => crownTopPct + 11, [crownTopPct]);
+  const waistTopPct = useMemo(() => crownTopPct + 30, [crownTopPct]);
+  const hipTopPct = useMemo(() => crownTopPct + 45, [crownTopPct]);
+
+  // Silhouette-specific guideline horizontal insets and badges
+  const silhouetteGuideStyles = useMemo(() => {
+    switch (bodySilhouette) {
+      case "athletic":
+        return {
+          shoulderInset: "inset-x-2",
+          waistInset: "inset-x-12",
+          hipInset: "inset-x-7",
+          tag: "⚡ Athletic V-Taper",
+          accentColor: "border-sky-400 text-sky-400",
+        };
+      case "curvy":
+        return {
+          shoulderInset: "inset-x-6",
+          waistInset: "inset-x-14",
+          hipInset: "inset-x-2",
+          tag: "✨ Curvy Hourglass",
+          accentColor: "border-pink-400 text-pink-400",
+        };
+      case "slim":
+        return {
+          shoulderInset: "inset-x-8",
+          waistInset: "inset-x-10",
+          hipInset: "inset-x-8",
+          tag: "📏 Slim Linear",
+          accentColor: "border-amber-400 text-amber-400",
+        };
+      case "relaxed":
+        return {
+          shoulderInset: "inset-x-4",
+          waistInset: "inset-x-5",
+          hipInset: "inset-x-4",
+          tag: "🌿 Relaxed Fit",
+          accentColor: "border-emerald-400 text-emerald-400",
+        };
+      case "regular":
+      default:
+        return {
+          shoulderInset: "inset-x-4",
+          waistInset: "inset-x-8",
+          hipInset: "inset-x-5",
+          tag: "🎯 Classic Balanced",
+          accentColor: "border-emerald-400 text-emerald-400",
+        };
+    }
+  }, [bodySilhouette]);
+
+  // Handler for framing coverage change (zooms and frames viewport live)
+  const handleFramingCoverageChange = (newFraming: PersonaFraming) => {
+    setFraming(newFraming);
+    if (newFraming === "three-quarters") {
+      setZoom(1.22);
+      setYOffset(10);
+    } else if (newFraming === "upper-body") {
+      setZoom(1.55);
+      setYOffset(20);
+    } else {
+      // full-body
+      setZoom(1.0);
+      setYOffset(0);
+    }
+  };
+
+  // Handler for posture change (adjusts alignment axis live)
+  const handlePostureChange = (newPosture: PersonaPosture) => {
+    setPosture(newPosture);
+    if (newPosture === "standing-quarter") {
+      setXOffset((prev) => (prev === 0 ? 2 : prev));
+    } else if (newPosture === "standing-frontal") {
+      setXOffset((prev) => (prev === 2 ? 0 : prev));
+    }
+  };
+
+  // Carousel horizontal scroll ref and smooth scroll handler
+  const carouselRef = useRef<HTMLDivElement>(null);
+  const scrollCarousel = (direction: "left" | "right") => {
+    if (!carouselRef.current) return;
+    const scrollAmount = 260;
+    carouselRef.current.scrollBy({
+      left: direction === "left" ? -scrollAmount : scrollAmount,
+      behavior: "smooth",
+    });
+  };
+
+  // Dynamic CSS filter and ambient lighting simulation based on calibrated lighting
+  const lightingStyle = useMemo(() => {
+    switch (lighting) {
+      case "warm-sunlight":
+        return {
+          filter: "brightness(1.04) contrast(1.05) saturate(1.15) sepia(0.08)",
+          tag: "☀️ Warm Sunlight",
+          glowClass: "from-amber-400/15 via-orange-300/10 to-transparent",
+        };
+      case "cool-ambient":
+        return {
+          filter: "brightness(0.98) contrast(1.06) saturate(0.92)",
+          tag: "❄️ Diffused Cool",
+          glowClass: "from-sky-400/20 via-blue-500/10 to-transparent",
+        };
+      case "studio-neutral":
+      default:
+        return {
+          filter: "brightness(1) contrast(1)",
+          tag: "💡 5500K Studio Neutral",
+          glowClass: "from-transparent to-transparent",
+        };
+    }
+  }, [lighting]);
+
+  const [isAutoFraming, setIsAutoFraming] = useState(false);
+
   const handleResetFraming = () => {
     setZoom(1.0);
     setXOffset(0);
     setYOffset(0);
     setFitMode("contain");
+  };
+
+  const handleAutoFitFraming = async (targetSrc?: string) => {
+    const src = targetSrc || previewImage || targetedPerson?.image;
+    if (!src) return;
+    setIsAutoFraming(true);
+    try {
+      const framing = await detectAutoFitFramingFromImageSrc(src);
+      if (framing) {
+        setZoom(framing.zoom);
+        setXOffset(framing.xOffset);
+        setYOffset(framing.yOffset);
+      }
+    } catch (e) {
+      console.warn("Auto fit framing failed:", e);
+    } finally {
+      setIsAutoFraming(false);
+    }
   };
 
   const handleSaveCalibration = async () => {
@@ -223,15 +373,21 @@ function ProfilePageContent() {
             : "Custom Persona"
         );
       }
-      // Auto-detect body silhouette from uploaded person photo
+      // Auto-detect body silhouette and optimal VTON framing from uploaded person photo
       try {
         const detected = await detectBodySilhouetteFromImageSrc(dataUrl);
         if (detected) {
           setBodySilhouette(detected);
           setIsSilhouetteAutoDetected(true);
         }
+        const framing = await detectAutoFitFramingFromImageSrc(dataUrl);
+        if (framing) {
+          setZoom(framing.zoom);
+          setXOffset(framing.xOffset);
+          setYOffset(framing.yOffset);
+        }
       } catch (err) {
-        console.warn("Auto silhouette detection fallback:", err);
+        console.warn("Auto silhouette / framing detection fallback:", err);
       }
     };
     reader.readAsDataURL(file);
@@ -443,28 +599,54 @@ function ProfilePageContent() {
               Select any persona to calibrate or set as default model
             </p>
           </div>
-          {targetedPerson && (
-            <div className="flex items-center gap-2">
-              {targetedPerson.isDefault ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
-                  <Check className="h-3 w-3 stroke-[3]" />
-                  Active Model
-                </span>
-              ) : (
-                <button
-                  onClick={async () => {
-                    await setActivePersonById(targetedPerson.id);
-                  }}
-                  className="rounded-full border border-line bg-bone px-3 py-1 text-[11px] font-semibold text-ink hover:bg-bone-deep transition-colors"
-                >
-                  Make Active Model
-                </button>
-              )}
+          <div className="flex items-center gap-2">
+            {targetedPerson && (
+              <div>
+                {targetedPerson.isDefault ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                    <Check className="h-3 w-3 stroke-[3]" />
+                    Active Model
+                  </span>
+                ) : (
+                  <button
+                    onClick={async () => {
+                      await setActivePersonById(targetedPerson.id);
+                    }}
+                    className="rounded-full border border-line bg-bone px-3 py-1 text-[11px] font-semibold text-ink hover:bg-bone-deep transition-colors cursor-pointer"
+                  >
+                    Make Active Model
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Left and Right Carousel Arrow Navigation */}
+            <div className="flex items-center gap-1 ml-1 border-l border-line pl-2">
+              <button
+                type="button"
+                onClick={() => scrollCarousel("left")}
+                className="rounded-full border border-line bg-paper p-1.5 text-ink-soft hover:text-ink hover:bg-bone transition-all shadow-2xs active:scale-95 cursor-pointer"
+                title="Previous personas"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollCarousel("right")}
+                className="rounded-full border border-line bg-paper p-1.5 text-ink-soft hover:text-ink hover:bg-bone transition-all shadow-2xs active:scale-95 cursor-pointer"
+                title="Next personas"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
             </div>
-          )}
+          </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3.5">
+        {/* Scrollable Personas Carousel */}
+        <div
+          ref={carouselRef}
+          className="flex items-center gap-3.5 overflow-x-auto scroll-smooth py-1 scrollbar-none"
+        >
           {persons.map((p) => {
             const isSelected = targetedPerson?.id === p.id;
             const score = p.calibration?.score ?? 92;
@@ -476,7 +658,7 @@ function ProfilePageContent() {
                   if (activeTab === "add") setActiveTab("calibrate");
                 }}
                 className={clsx(
-                  "group relative cursor-pointer overflow-hidden rounded-2xl border p-2 transition-all duration-200",
+                  "group relative cursor-pointer overflow-hidden rounded-2xl border p-2 transition-all duration-200 shrink-0 w-[130px] sm:w-[145px]",
                   isSelected
                     ? "border-ink bg-bone-deep/70 ring-2 ring-ink shadow-sm"
                     : "border-line bg-bone hover:border-ink/40"
@@ -516,43 +698,90 @@ function ProfilePageContent() {
           {/* LEFT 6 COLS: INTERACTIVE CALIBRATION CANVAS */}
           <div className="lg:col-span-6 flex flex-col items-center space-y-4">
             <div className="w-full rounded-3xl border border-line bg-paper p-5 shadow-sm">
-              <div className="flex items-center justify-between mb-3 px-1">
+              {/* Studio Viewport Header */}
+              <div className="flex flex-wrap items-center justify-between gap-2.5 mb-3.5 px-0.5">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-mono uppercase tracking-wider text-ink-soft">
+                  <span className="font-display text-sm font-bold text-ink">
                     Calibration Viewport
                   </span>
-                  <span className="rounded-md bg-flame/10 px-2 py-0.5 text-[10px] font-bold text-flame">
-                    2:3 Portrait Studio Frame
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 px-2 py-0.5 text-[10px] font-mono font-semibold text-emerald-700 dark:text-emerald-300">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    2:3 VTON Frame
                   </span>
                 </div>
 
-                <div className="flex items-center gap-1.5">
+                {/* Streamlined Studio Toolbar */}
+                <div className="flex items-center gap-1 bg-bone-deep/50 dark:bg-black/30 p-1 rounded-2xl border border-line">
+                  {/* 1. Guides Toggle */}
                   <button
+                    type="button"
                     onClick={() => setShowGuidelines(!showGuidelines)}
                     className={clsx(
-                      "inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1 text-[11px] font-semibold transition-colors cursor-pointer",
+                      "inline-flex items-center gap-1.5 rounded-xl px-2.5 h-7.5 text-xs font-semibold transition-all cursor-pointer active:scale-95",
                       showGuidelines
-                        ? "border-flame/40 bg-flame/10 text-flame"
-                        : "border-line bg-bone text-ink-soft hover:text-ink"
+                        ? "bg-ink text-bone shadow-2xs"
+                        : "text-ink-soft hover:text-ink hover:bg-bone"
                     )}
-                    title="Toggle alignment guidelines"
+                    title="Toggle alignment guidelines & VTON frame"
                   >
                     {showGuidelines ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-                    <span>{showGuidelines ? "Guides ON" : "Guides OFF"}</span>
+                    <span>Guides</span>
                   </button>
 
+                  {/* 2. Reset Button */}
                   <button
+                    type="button"
                     onClick={handleResetFraming}
-                    className="rounded-xl border border-line bg-bone p-1.5 text-ink-soft hover:text-ink transition-colors cursor-pointer"
+                    className="inline-flex items-center justify-center rounded-xl h-7.5 w-7.5 text-ink-soft hover:text-ink hover:bg-bone transition-all cursor-pointer active:scale-95"
                     title="Reset framing & zoom"
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
                   </button>
+
+                  <div className="h-4 w-px bg-line/80 mx-0.5" />
+
+                  {/* 3. Auto-Fit Button */}
+                  <button
+                    type="button"
+                    onClick={() => handleAutoFitFraming()}
+                    disabled={isAutoFraming || !targetedPerson}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-flame/30 bg-flame/10 px-2.5 h-7.5 text-xs font-bold text-flame hover:bg-flame hover:text-white transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                    title="Auto-Fit persona to VTON frame with safe head & shoes margins"
+                  >
+                    <Wand2 className={clsx("h-3.5 w-3.5", isAutoFraming && "animate-spin")} />
+                    <span>Auto-Fit</span>
+                  </button>
+
+                  {/* 4. Permanent Save Frame Button */}
+                  <button
+                    type="button"
+                    onClick={handleSaveCalibration}
+                    disabled={isSaving || !targetedPerson}
+                    className={clsx(
+                      "inline-flex items-center gap-1.5 rounded-xl px-3 h-7.5 text-xs font-bold transition-all cursor-pointer active:scale-95",
+                      saveSuccess
+                        ? "bg-emerald-600 text-white shadow-2xs shadow-emerald-500/20"
+                        : "bg-ink text-bone hover:bg-flame shadow-2xs"
+                    )}
+                    title="Permanently save fitted framing to this persona"
+                  >
+                    {saveSuccess ? (
+                      <>
+                        <Check className="h-3.5 w-3.5 stroke-[3]" />
+                        <span>Saved</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="h-3.5 w-3.5" />
+                        <span>Save</span>
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
 
-              {/* Viewport Canvas with Guidelines Overlay: Natural 2:3 Edge-to-Edge Photograph */}
-              <div className="relative aspect-[2/3] w-full max-w-sm sm:max-w-md mx-auto overflow-hidden rounded-2xl border border-line bg-bone-deep shadow-inner select-none flex items-center justify-center">
+              {/* Viewport Canvas with Guidelines Overlay: Natural 2:3 Studio Canvas */}
+              <div className="relative aspect-[2/3] w-full max-w-sm sm:max-w-md mx-auto overflow-hidden rounded-2xl border border-black/[0.08] dark:border-white/[0.1] bg-[#fafafa] dark:bg-[#111113] shadow-[0_10px_35px_-5px_rgba(0,0,0,0.06)] dark:shadow-[0_10px_35px_-5px_rgba(0,0,0,0.4)] select-none flex items-center justify-center">
                 {targetedPerson ? (
                   <div className="relative h-full w-full overflow-hidden flex items-center justify-center">
                     <img
@@ -561,10 +790,22 @@ function ProfilePageContent() {
                       style={{
                         transform: `scale(${zoom}) translate(${xOffset}%, ${yOffset}%)`,
                         transformOrigin: "center center",
-                        transition: "transform 0.15s ease-out",
+                        transition: "transform 0.15s ease-out, filter 0.25s ease-out",
+                        filter: lightingStyle.filter,
                       }}
-                      className="h-full w-full object-cover object-top pointer-events-none"
+                      className="h-full w-full object-contain pointer-events-none"
                     />
+
+                    {/* Ambient Lighting Simulation Overlay */}
+                    {lighting !== "studio-neutral" && (
+                      <div
+                        className={clsx(
+                          "absolute inset-0 pointer-events-none transition-opacity duration-300",
+                          lighting === "warm-sunlight" && "bg-gradient-to-tr from-amber-400/15 via-orange-300/10 to-transparent mix-blend-soft-light",
+                          lighting === "cool-ambient" && "bg-gradient-to-tr from-sky-400/15 via-blue-300/10 to-transparent mix-blend-soft-light"
+                        )}
+                      />
+                    )}
                   </div>
                 ) : (
                   <div className="h-full w-full flex flex-col items-center justify-center text-ink-soft">
@@ -573,79 +814,131 @@ function ProfilePageContent() {
                   </div>
                 )}
 
-                {/* DensePose Anatomical Overlay Guidelines */}
+
+                {/* Professional Studio Camera Viewfinder Guidelines (z-30 Guaranteed on Top of Photo) */}
                 {showGuidelines && (
-                  <div className="absolute inset-0 pointer-events-none">
-                    {/* Outer Target Framing Box */}
-                    <div className="absolute inset-4 rounded-xl border border-dashed border-emerald-400/40">
-                      <div className="absolute top-1 left-2 text-[9px] font-mono text-emerald-400/80 font-bold tracking-wider">
-                        DENSEPOSE VTON FRAME
+                  <div className="absolute inset-0 pointer-events-none z-30">
+                    {/* Outer Dotted VTON Safe Frame with Curved Edges */}
+                    <div className="absolute inset-3.5 sm:inset-4.5 rounded-2xl border-2 border-dashed border-emerald-400 drop-shadow-[0_1px_4px_rgba(0,0,0,0.95)]">
+                      {/* Top Corner Pill: VTON Safe Frame */}
+                      <div className="absolute -top-2.5 left-3 bg-black/90 text-emerald-300 border border-emerald-400/50 text-[9px] font-mono font-bold px-2 py-0.5 rounded-full shadow-md tracking-wider flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        <span>VTON FRAME</span>
+                      </div>
+
+                      {/* Bottom Corner Pill: Safe Bounds */}
+                      <div className="absolute -bottom-2.5 right-3 bg-black/90 text-emerald-300 border border-emerald-400/50 text-[9px] font-mono font-bold px-2 py-0.5 rounded-full shadow-md tracking-wider">
+                        <span>SAFE BOUNDS</span>
                       </div>
                     </div>
 
-                    {/* Central Vertical Plumb Line */}
-                    <div className="absolute left-1/2 top-4 bottom-4 w-px border-l border-dashed border-sky-400/35" />
+                    {/* 4 High-Contrast Studio Viewfinder Corner Marks */}
+                    <div className="absolute top-3.5 left-3.5 w-4 h-4 border-t-2 border-l-2 border-emerald-400 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]" />
+                    <div className="absolute top-3.5 right-3.5 w-4 h-4 border-t-2 border-r-2 border-emerald-400 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]" />
+                    <div className="absolute bottom-3.5 left-3.5 w-4 h-4 border-b-2 border-l-2 border-emerald-400 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]" />
+                    <div className="absolute bottom-3.5 right-3.5 w-4 h-4 border-b-2 border-r-2 border-emerald-400 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]" />
 
-                    {/* Crown / Eyeline Guide (top 15%) */}
-                    <div className="absolute top-[15%] inset-x-4 border-t border-dashed border-amber-400/60 flex items-center justify-between px-2">
-                      <span className="text-[9px] font-mono text-amber-400 font-bold bg-ink/70 px-1 rounded-xs">
+                    {/* Central Vertical Plumb Axis */}
+                    <div
+                      className={clsx(
+                        "absolute top-6 bottom-6 w-px border-l-2 border-dashed drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] transition-transform duration-200",
+                        posture === "standing-quarter"
+                          ? "left-[49%] rotate-[2deg] border-amber-300/80"
+                          : "left-1/2 border-sky-300/80"
+                      )}
+                    />
+
+                    {/* Left Metric Height Ruler */}
+                    <div className="absolute left-2.5 top-8 bottom-8 flex flex-col justify-between text-[9px] font-mono text-emerald-300 font-bold drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] pointer-events-none">
+                      <div className="flex items-center gap-1">
+                        <div className="w-2 h-0.5 bg-emerald-400 shadow-xs" />
+                        <span className="bg-black/85 px-1 py-0.2 rounded border border-emerald-500/30">{heightCm}cm</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <div className="w-1.5 h-px bg-emerald-400/70" />
+                        <span className="bg-black/60 px-0.5 rounded text-[8px] text-emerald-400/80">1/2</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <div className="w-2 h-0.5 bg-emerald-400 shadow-xs" />
+                        <span className="bg-black/85 px-1 py-0.2 rounded border border-emerald-500/30">0cm</span>
+                      </div>
+                    </div>
+
+                    {/* Crown / Eyeline Guide */}
+                    <div
+                      style={{ top: `${crownTopPct}%` }}
+                      className="absolute inset-x-6 border-t-2 border-dashed border-amber-400 drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] flex items-center justify-between transition-all duration-150"
+                    >
+                      <span className="text-[9px] font-mono font-bold bg-black/85 text-amber-300 px-1.5 py-0.5 rounded border border-amber-400/40 shadow-xs">
                         HEAD / CROWN
                       </span>
-                      <span className="text-[9px] font-mono text-amber-400/80">15%</span>
-                    </div>
-
-                    {/* Shoulder Plane Axis (top 26%) */}
-                    <div className="absolute top-[26%] inset-x-4 border-t border-dashed border-sky-400/60 flex items-center justify-between px-2">
-                      <span className="text-[9px] font-mono text-sky-400 font-bold bg-ink/70 px-1 rounded-xs">
-                        SHOULDER PLANE
+                      <span className="text-[9px] font-mono font-bold bg-black/85 text-amber-300 px-1.5 py-0.5 rounded border border-amber-400/40 shadow-xs">
+                        {crownTopPct.toFixed(0)}%
                       </span>
-                      <span className="text-[9px] font-mono text-sky-400/80">26%</span>
                     </div>
 
-                    {/* Natural Waistline / Torso Center (top 45%) */}
-                    <div className="absolute top-[45%] inset-x-4 border-t border-dashed border-emerald-400/60 flex items-center justify-between px-2">
-                      <span className="text-[9px] font-mono text-emerald-400 font-bold bg-ink/70 px-1 rounded-xs">
-                        NATURAL WAIST / TORSO
+                    {/* Shoulder Plane Axis */}
+                    <div
+                      style={{ top: `${shoulderTopPct}%` }}
+                      className={clsx(
+                        "absolute border-t-2 border-dashed border-sky-400 drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] flex items-center justify-between transition-all duration-150",
+                        silhouetteGuideStyles.shoulderInset,
+                        posture === "standing-quarter" && "rotate-[2.5deg]"
+                      )}
+                    >
+                      <span className="text-[9px] font-mono font-bold bg-black/85 text-sky-300 px-1.5 py-0.5 rounded border border-sky-400/40 shadow-xs">
+                        SHOULDERS ({bodySilhouette.toUpperCase()})
                       </span>
-                      <span className="text-[9px] font-mono text-emerald-400/80">45%</span>
-                    </div>
-
-                    {/* Hip & Hemline Level (top 60%) */}
-                    <div className="absolute top-[60%] inset-x-4 border-t border-dashed border-purple-400/60 flex items-center justify-between px-2">
-                      <span className="text-[9px] font-mono text-purple-400 font-bold bg-ink/70 px-1 rounded-xs">
-                        HIP / TROUSER HEM
+                      <span className="text-[9px] font-mono font-bold bg-black/85 text-sky-300 px-1.5 py-0.5 rounded border border-sky-400/40 shadow-xs">
+                        {silhouetteGuideStyles.tag}
                       </span>
-                      <span className="text-[9px] font-mono text-purple-400/80">60%</span>
                     </div>
 
-                    {/* Bottom Ground Reference (bottom 8%) */}
-                    <div className="absolute bottom-[8%] inset-x-4 border-t border-dashed border-bone/40 flex items-center justify-between px-2">
-                      <span className="text-[9px] font-mono text-bone/70 bg-ink/70 px-1 rounded-xs">
-                        GROUND / FOOTBED
+                    {/* Waistline Guide */}
+                    <div
+                      style={{ top: `${waistTopPct}%` }}
+                      className={clsx(
+                        "absolute border-t-2 border-dashed drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] flex items-center justify-between transition-all duration-150",
+                        silhouetteGuideStyles.waistInset,
+                        bodySilhouette === "curvy" ? "border-pink-400" : "border-emerald-400"
+                      )}
+                    >
+                      <span className={clsx("text-[9px] font-mono font-bold bg-black/85 px-1.5 py-0.5 rounded border shadow-xs", bodySilhouette === "curvy" ? "text-pink-300 border-pink-400/40" : "text-emerald-300 border-emerald-400/40")}>
+                        WAIST ({bodySilhouette === "curvy" ? "HOURGLASS" : bodySilhouette === "athletic" ? "V-TAPER" : "TORSO"})
                       </span>
-                      <span className="text-[9px] font-mono text-bone/60">92%</span>
                     </div>
 
-                    {/* Crosshair Center Reticle */}
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center opacity-40">
-                      <div className="w-6 h-px bg-flame" />
-                      <div className="h-6 w-px bg-flame -ml-3" />
+                    {/* Hip / Hemline Level */}
+                    <div
+                      style={{ top: `${hipTopPct}%` }}
+                      className={clsx(
+                        "absolute border-t-2 border-dashed drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] flex items-center justify-between transition-all duration-150",
+                        silhouetteGuideStyles.hipInset,
+                        bodySilhouette === "curvy" ? "border-pink-400" : "border-purple-400"
+                      )}
+                    >
+                      <span className={clsx("text-[9px] font-mono font-bold bg-black/85 px-1.5 py-0.5 rounded border shadow-xs", bodySilhouette === "curvy" ? "text-pink-300 border-pink-400/40" : "text-purple-300 border-purple-400/40")}>
+                        HIP / HEM
+                      </span>
+                      <span className="text-[9px] font-mono font-bold bg-black/85 text-purple-300 px-1.5 py-0.5 rounded border border-purple-400/40 shadow-xs">
+                        {hipTopPct.toFixed(0)}%
+                      </span>
+                    </div>
+
+                    {/* Ground / Footbed Reference Line (High contrast green safe line) */}
+                    <div
+                      style={{ bottom: `${groundBottomPct}%` }}
+                      className="absolute inset-x-6 border-t-2 border-dashed border-emerald-400 drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] flex items-center justify-between transition-all duration-150"
+                    >
+                      <span className="text-[9px] font-mono text-emerald-300 font-bold bg-black/85 px-1.5 py-0.5 rounded border border-emerald-400/40 shadow-xs">
+                        {framing === "three-quarters" ? "3/4 THIGH CROP" : "SAFE FOOTBED (SHOES)"}
+                      </span>
+                      <span className="text-[9px] font-mono text-emerald-300 font-bold bg-black/85 px-1.5 py-0.5 rounded border border-emerald-400/40 shadow-xs">
+                        {framing === "three-quarters" ? "3/4" : `${(100 - groundBottomPct).toFixed(0)}%`}
+                      </span>
                     </div>
                   </div>
                 )}
-
-                {/* Bottom Canvas HUD Tag */}
-                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-ink/90 via-ink/50 to-transparent p-3.5 text-bone flex items-end justify-between">
-                  <div>
-                    <h4 className="text-xs font-bold font-display">{targetedPerson?.name}</h4>
-                    <p className="text-[10px] text-bone/80 font-mono mt-0.5">
-                      Scale {zoom.toFixed(2)}x • Offset ({xOffset}%, {yOffset}%)
-                    </p>
-                  </div>
-                  <div className="rounded-full bg-emerald-500/20 border border-emerald-400/30 px-2.5 py-0.5 text-[10px] font-bold text-emerald-300">
-                    {computedScore}% Calibrated
-                  </div>
-                </div>
               </div>
 
               {/* Framing Fine-Tuning Controls */}
@@ -659,8 +952,8 @@ function ProfilePageContent() {
                 </div>
                 <input
                   type="range"
-                  min="0.8"
-                  max="1.5"
+                  min="0.6"
+                  max="1.6"
                   step="0.02"
                   value={zoom}
                   onChange={(e) => setZoom(parseFloat(e.target.value))}
@@ -841,9 +1134,14 @@ function ProfilePageContent() {
 
               {/* 3. Primary Posture */}
               <div>
-                <label className="block text-xs font-semibold text-ink mb-2">
-                  Reference Stance & Posture
-                </label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-semibold text-ink">
+                    Reference Stance & Posture
+                  </label>
+                  <span className="text-[10px] font-mono text-ink-soft">
+                    {posture === "standing-frontal" ? "Symmetric Plumb Axis" : "Dynamic 3/4 Turn Axis"}
+                  </span>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {POSTURES.map((p) => {
                     const isSelected = posture === p.id;
@@ -851,11 +1149,11 @@ function ProfilePageContent() {
                       <button
                         key={p.id}
                         type="button"
-                        onClick={() => setPosture(p.id)}
+                        onClick={() => handlePostureChange(p.id)}
                         className={clsx(
-                          "flex flex-col text-left p-3 rounded-2xl border transition-all",
+                          "flex flex-col text-left p-3 rounded-2xl border transition-all cursor-pointer",
                           isSelected
-                            ? "border-ink bg-bone-deep ring-1 ring-ink"
+                            ? "border-ink bg-bone-deep ring-1 ring-ink shadow-2xs"
                             : "border-line bg-bone hover:border-ink/40"
                         )}
                       >
@@ -874,13 +1172,18 @@ function ProfilePageContent() {
               {/* 4. Framing Type & Lighting */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-ink mb-1.5">
-                    Framing Coverage
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-ink">
+                      Framing Coverage
+                    </label>
+                    <span className="text-[10px] font-mono text-flame font-bold">
+                      {framing === "three-quarters" ? "3/4 Crop" : "Full Length"}
+                    </span>
+                  </div>
                   <select
                     value={framing}
-                    onChange={(e) => setFraming(e.target.value as PersonaFraming)}
-                    className="w-full rounded-xl border border-line bg-bone px-3 py-2 text-xs text-ink focus:border-ink focus:outline-none"
+                    onChange={(e) => handleFramingCoverageChange(e.target.value as PersonaFraming)}
+                    className="w-full rounded-xl border border-line bg-bone px-3 py-2 text-xs text-ink focus:border-ink focus:outline-none cursor-pointer"
                   >
                     {FRAMINGS.map((f) => (
                       <option key={f.id} value={f.id}>
@@ -897,7 +1200,7 @@ function ProfilePageContent() {
                   <select
                     value={lighting}
                     onChange={(e) => setLighting(e.target.value as PersonaLighting)}
-                    className="w-full rounded-xl border border-line bg-bone px-3 py-2 text-xs text-ink focus:border-ink focus:outline-none"
+                    className="w-full rounded-xl border border-line bg-bone px-3 py-2 text-xs text-ink focus:border-ink focus:outline-none cursor-pointer"
                   >
                     {LIGHTINGS.map((l) => (
                       <option key={l.id} value={l.id}>
@@ -913,10 +1216,10 @@ function ProfilePageContent() {
                 type="button"
                 onClick={handleSaveCalibration}
                 disabled={isSaving || !targetedPerson}
-                className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-ink px-4 py-3 text-xs font-semibold text-bone hover:bg-flame disabled:opacity-50 transition-all shadow-sm"
+                className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-ink px-4 py-3 text-xs font-semibold text-bone hover:bg-flame disabled:opacity-50 transition-all shadow-sm cursor-pointer active:scale-[0.99]"
               >
                 {isSaving ? (
-                  <span>Synchronizing calibration...</span>
+                  <span>Synchronizing calibration specs...</span>
                 ) : (
                   <>
                     <Save className="h-3.5 w-3.5" />
@@ -939,7 +1242,9 @@ function ProfilePageContent() {
                     <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                     <span className="font-medium text-ink">Aspect Ratio Match</span>
                   </div>
-                  <span className="font-mono text-[11px] text-ink-soft">3:4 Standard</span>
+                  <span className="font-mono text-[11px] text-emerald-700 dark:text-emerald-300 font-bold">
+                    2:3 Studio (1024×1536)
+                  </span>
                 </div>
 
                 <div className="flex items-center justify-between p-2.5 rounded-xl bg-bone">
@@ -997,39 +1302,61 @@ function ProfilePageContent() {
 
               {previewImage ? (
                 <div className="space-y-4">
-                  {/* Photo Preview Canvas: Natural 2:3 Edge-to-Edge Photograph */}
-                  <div className="relative aspect-[2/3] max-w-sm sm:max-w-md w-full mx-auto overflow-hidden rounded-2xl border border-line bg-bone-deep shadow-inner flex items-center justify-center">
+                  {/* Photo Preview Canvas: Natural 2:3 Studio Canvas */}
+                  <div className="relative aspect-[2/3] max-w-sm sm:max-w-md w-full mx-auto overflow-hidden rounded-2xl border border-black/[0.08] dark:border-white/[0.1] bg-[#fafafa] dark:bg-[#111113] shadow-[0_10px_35px_-5px_rgba(0,0,0,0.06)] dark:shadow-[0_10px_35px_-5px_rgba(0,0,0,0.4)] flex items-center justify-center">
                     <img
                       src={previewImage}
                       alt="Upload Preview"
                       style={{
                         transform: `scale(${zoom}) translate(${xOffset}%, ${yOffset}%)`,
                         transformOrigin: "center center",
+                        filter: lightingStyle.filter,
                       }}
-                      className="h-full w-full object-cover object-top pointer-events-none transition-transform duration-150"
+                      className="h-full w-full object-contain pointer-events-none transition-transform duration-150"
                     />
 
-                    {/* Subtle top gradient for clean badge contrast */}
-                    <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-transparent pointer-events-none" />
+                    {/* Ambient Lighting Simulation Overlay */}
+                    {lighting !== "studio-neutral" && (
+                      <div
+                        className={clsx(
+                          "absolute inset-0 pointer-events-none transition-opacity duration-300",
+                          lighting === "warm-sunlight" && "bg-gradient-to-tr from-amber-400/15 via-orange-300/10 to-transparent mix-blend-soft-light",
+                          lighting === "cool-ambient" && "bg-gradient-to-tr from-sky-400/15 via-blue-300/10 to-transparent mix-blend-soft-light"
+                        )}
+                      />
+                    )}
 
-                    {/* Top Floating Control Bar */}
-                    <div className="absolute top-3 inset-x-3 z-20 flex items-center justify-between">
-                      <span className="inline-flex items-center gap-1 rounded-full bg-paper/90 backdrop-blur-md border border-line px-2.5 py-1 text-[11px] font-mono font-bold text-ink shadow-2xs">
-                        2:3 Portrait Preview
+                    {/* Minimalist Top Control Bar */}
+                    <div className="absolute top-2 inset-x-2.5 z-40 flex items-center justify-between pointer-events-none">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-black/80 backdrop-blur-md px-3 py-1 text-[10px] font-mono font-medium text-white/95 border border-white/15 shadow-md">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        <span>Preview • {zoom.toFixed(2)}x</span>
                       </span>
 
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1 pointer-events-auto bg-black/60 backdrop-blur-md p-1 rounded-2xl border border-white/15 shadow-md">
+                        <button
+                          type="button"
+                          onClick={() => handleAutoFitFraming(previewImage)}
+                          disabled={isAutoFraming}
+                          className="inline-flex items-center gap-1 px-2.5 h-7 text-xs font-bold rounded-xl border border-flame/40 bg-flame/20 text-flame hover:bg-flame hover:text-white transition-all cursor-pointer active:scale-95"
+                          title="Auto-Fit persona into VTON frame"
+                        >
+                          <Wand2 className={clsx("h-3 w-3", isAutoFraming && "animate-spin")} />
+                          <span>Auto-Fit</span>
+                        </button>
+
                         <button
                           type="button"
                           onClick={() => setShowGuidelines(!showGuidelines)}
                           className={clsx(
-                            "px-2.5 py-1 text-[11px] font-semibold rounded-xl border backdrop-blur-md transition-colors cursor-pointer",
+                            "inline-flex items-center gap-1 px-2.5 h-7 text-xs font-semibold rounded-xl transition-all cursor-pointer active:scale-95",
                             showGuidelines
-                              ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-700 dark:text-emerald-300"
-                              : "bg-paper/90 border-line text-ink-soft hover:text-ink"
+                              ? "bg-white text-ink font-bold shadow-2xs"
+                              : "text-white/80 hover:text-white hover:bg-white/10"
                           )}
                         >
-                          {showGuidelines ? "Guides ON" : "Guides OFF"}
+                          {showGuidelines ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                          <span>Guides</span>
                         </button>
 
                         <button
@@ -1039,29 +1366,100 @@ function ProfilePageContent() {
                             setFileToUpload(null);
                             setIsSilhouetteAutoDetected(false);
                           }}
-                          className="rounded-full bg-paper/90 backdrop-blur-md border border-line p-1.5 text-ink-soft hover:text-flame hover:bg-bone transition-colors shadow-xs cursor-pointer"
+                          className="rounded-xl p-1.5 text-white/70 hover:text-flame hover:bg-white/10 transition-colors cursor-pointer active:scale-95"
                           title="Clear photo"
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     </div>
 
-                    {/* Anatomical Alignment Guidelines */}
+                    {/* Professional Studio Camera Viewfinder Guidelines (z-30 Guaranteed on Top of Photo) */}
                     {showGuidelines && (
-                      <div className="absolute inset-0 pointer-events-none z-15">
-                        <div className="absolute inset-4 rounded-xl border border-dashed border-emerald-400/35" />
-                        <div className="absolute top-[18%] inset-x-4 border-t border-dashed border-sky-400/50">
-                          <span className="text-[9px] font-mono text-sky-600 dark:text-sky-300 px-1 bg-paper/85 rounded ml-2">Head / Eyes</span>
+                      <div className="absolute inset-0 pointer-events-none z-30">
+                        {/* Outer Dotted VTON Safe Frame with Curved Edges */}
+                        <div className="absolute inset-3.5 sm:inset-4.5 rounded-2xl border-2 border-dashed border-emerald-400 drop-shadow-[0_1px_4px_rgba(0,0,0,0.95)]">
+                          {/* Top Corner Pill: VTON Safe Frame */}
+                          <div className="absolute -top-2.5 left-3 bg-black/90 text-emerald-300 border border-emerald-400/50 text-[9px] font-mono font-bold px-2 py-0.5 rounded-full shadow-md tracking-wider flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            <span>VTON FRAME</span>
+                          </div>
+
+                          {/* Bottom Corner Pill: Safe Bounds */}
+                          <div className="absolute -bottom-2.5 right-3 bg-black/90 text-emerald-300 border border-emerald-400/50 text-[9px] font-mono font-bold px-2 py-0.5 rounded-full shadow-md tracking-wider">
+                            <span>SAFE BOUNDS</span>
+                          </div>
                         </div>
-                        <div className="absolute top-[26%] inset-x-4 border-t border-dashed border-amber-400/50">
-                          <span className="text-[9px] font-mono text-amber-600 dark:text-amber-300 px-1 bg-paper/85 rounded ml-2">Shoulders</span>
+                        {/* 4 High-Contrast Studio Viewfinder Corner Marks */}
+                        <div className="absolute top-3.5 left-3.5 w-4 h-4 border-t-2 border-l-2 border-emerald-400 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]" />
+                        <div className="absolute top-3.5 right-3.5 w-4 h-4 border-t-2 border-r-2 border-emerald-400 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]" />
+                        <div className="absolute bottom-3.5 left-3.5 w-4 h-4 border-b-2 border-l-2 border-emerald-400 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]" />
+                        <div className="absolute bottom-3.5 right-3.5 w-4 h-4 border-b-2 border-r-2 border-emerald-400 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]" />
+
+                        {/* Central Plumb Line */}
+                        <div
+                          className={clsx(
+                            "absolute top-6 bottom-6 w-px border-l-2 border-dashed drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] transition-transform duration-200",
+                            posture === "standing-quarter"
+                              ? "left-[49%] rotate-[2deg] border-amber-300/80"
+                              : "left-1/2 border-sky-300/80"
+                          )}
+                        />
+
+                        {/* Crown / Eyeline Guide */}
+                        <div
+                          style={{ top: `${crownTopPct}%` }}
+                          className="absolute inset-x-6 border-t-2 border-dashed border-amber-400 drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] flex items-center justify-between transition-all duration-150"
+                        >
+                          <span className="text-[9px] font-mono font-bold bg-black/85 text-amber-300 px-1.5 py-0.5 rounded border border-amber-400/40 shadow-xs">
+                            HEAD / CROWN
+                          </span>
+                          <span className="text-[9px] font-mono font-bold bg-black/85 text-amber-300 px-1.5 py-0.5 rounded border border-amber-400/40 shadow-xs">
+                            {crownTopPct.toFixed(0)}%
+                          </span>
                         </div>
-                        <div className="absolute top-[48%] inset-x-4 border-t border-dashed border-emerald-400/50">
-                          <span className="text-[9px] font-mono text-emerald-700 dark:text-emerald-300 px-1 bg-paper/85 rounded ml-2">Waist / Hips</span>
+
+                        {/* Shoulders Guide */}
+                        <div
+                          style={{ top: `${shoulderTopPct}%` }}
+                          className={clsx(
+                            "absolute border-t-2 border-dashed border-sky-400 drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] flex items-center justify-between transition-all duration-150",
+                            silhouetteGuideStyles.shoulderInset,
+                            posture === "standing-quarter" && "rotate-[2.5deg]"
+                          )}
+                        >
+                          <span className="text-[9px] font-mono font-bold bg-black/85 text-sky-300 px-1.5 py-0.5 rounded border border-sky-400/40 shadow-xs">
+                            SHOULDERS ({bodySilhouette.toUpperCase()})
+                          </span>
+                          <span className="text-[9px] font-mono font-bold bg-black/85 text-sky-300 px-1.5 py-0.5 rounded border border-sky-400/40 shadow-xs">
+                            {silhouetteGuideStyles.tag}
+                          </span>
                         </div>
-                        <div className="absolute top-[88%] inset-x-4 border-t border-dashed border-purple-400/50">
-                          <span className="text-[9px] font-mono text-purple-700 dark:text-purple-300 px-1 bg-paper/85 rounded ml-2">Ankles / Feet</span>
+
+                        {/* Waist Guide */}
+                        <div
+                          style={{ top: `${waistTopPct}%` }}
+                          className={clsx(
+                            "absolute border-t-2 border-dashed border-pink-400 drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] flex items-center justify-between transition-all duration-150",
+                            silhouetteGuideStyles.waistInset
+                          )}
+                        >
+                          <span className="text-[9px] font-mono font-bold bg-black/85 text-pink-300 px-1.5 py-0.5 rounded border border-pink-400/40 shadow-xs">
+                            WAIST / TORSO
+                          </span>
+                        </div>
+
+                        {/* Feet / Ground Guide (Green safe line, shoes clearly visible below) */}
+                        <div
+                          style={{ bottom: `${groundBottomPct}%` }}
+                          className="absolute inset-x-6 border-t-2 border-dashed border-emerald-400 drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] flex items-center justify-between transition-all duration-150"
+                        >
+                          <span className="text-[9px] font-mono font-bold bg-black/85 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-400/40 shadow-xs">
+                            FEET / SOLES SAFE ZONE
+                          </span>
+                          <span className="text-[9px] font-mono font-bold bg-black/85 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-400/40 shadow-xs">
+                            {(100 - groundBottomPct).toFixed(0)}%
+                          </span>
                         </div>
                       </div>
                     )}
@@ -1072,10 +1470,19 @@ function ProfilePageContent() {
                     <div className="flex items-center justify-between text-xs">
                       <span className="font-semibold text-ink flex items-center gap-1.5">
                         <Maximize2 className="h-3.5 w-3.5 text-flame" />
-                        <span>Fine-tune Framing Zoom</span>
+                        <span>Framing Scale & VTON Fit</span>
                       </span>
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-ink text-xs font-semibold">{zoom.toFixed(2)}x</span>
+                        <button
+                          type="button"
+                          onClick={() => handleAutoFitFraming(previewImage)}
+                          disabled={isAutoFraming}
+                          className="inline-flex items-center gap-1 text-[10px] text-flame hover:underline font-mono cursor-pointer"
+                        >
+                          <Wand2 className="h-3 w-3" />
+                          <span>Auto-Fit</span>
+                        </button>
                         <button
                           type="button"
                           onClick={() => {
@@ -1092,12 +1499,55 @@ function ProfilePageContent() {
                     <input
                       type="range"
                       min="0.6"
-                      max="1.8"
+                      max="1.6"
                       step="0.02"
                       value={zoom}
                       onChange={(e) => setZoom(parseFloat(e.target.value))}
                       className="w-full accent-flame h-1.5 bg-bone-deep rounded-lg cursor-pointer"
                     />
+
+                    {/* Pan Sliders */}
+                    <div className="grid grid-cols-2 gap-3 pt-1">
+                      <div>
+                        <div className="flex items-center justify-between text-[11px] mb-1">
+                          <span className="font-medium text-ink-soft">Vertical Pan</span>
+                          <span className="font-mono text-ink font-semibold">{yOffset}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="-25"
+                          max="25"
+                          step="1"
+                          value={yOffset}
+                          onChange={(e) => setYOffset(parseInt(e.target.value))}
+                          className="w-full accent-ink h-1.5 bg-bone-deep rounded-lg cursor-pointer"
+                        />
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between text-[11px] mb-1">
+                          <span className="font-medium text-ink-soft">Horizontal Pan</span>
+                          <span className="font-mono text-ink font-semibold">{xOffset}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="-20"
+                          max="20"
+                          step="1"
+                          value={xOffset}
+                          onChange={(e) => setXOffset(parseInt(e.target.value))}
+                          className="w-full accent-ink h-1.5 bg-bone-deep rounded-lg cursor-pointer"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1 border-t border-line/60 text-[11px]">
+                      <div className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300 font-medium">
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        <span>VTON Bounds: Head, shoulders & shoes protected</span>
+                      </div>
+                      <span className="text-ink-soft font-mono text-[10px]">2:3 Native Studio</span>
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -1138,6 +1588,12 @@ function ProfilePageContent() {
                             if (detected) {
                               setBodySilhouette(detected);
                               setIsSilhouetteAutoDetected(true);
+                            }
+                            const framing = await detectAutoFitFramingFromImageSrc(preset.image);
+                            if (framing) {
+                              setZoom(framing.zoom);
+                              setXOffset(framing.xOffset);
+                              setYOffset(framing.yOffset);
                             }
                           } catch {}
                         }}

@@ -240,6 +240,8 @@ export function getGarments(filter?: {
         g.name.toLowerCase().includes(term) ||
         (g.type && g.type.toLowerCase().includes(term)) ||
         (g.color && g.color.toLowerCase().includes(term)) ||
+        (g.secondaryColor && g.secondaryColor.toLowerCase().includes(term)) ||
+        (g.pattern && g.pattern.toLowerCase().includes(term)) ||
         g.category.toLowerCase().includes(term)
     );
   }
@@ -292,6 +294,10 @@ export function createGarment(
     type: item.type?.trim() || undefined,
     color: item.color?.trim() || undefined,
     colorHex: item.colorHex || undefined,
+    secondaryColor: item.secondaryColor?.trim() || undefined,
+    secondaryColorHex: item.secondaryColorHex || undefined,
+    accentColors: item.accentColors || undefined,
+    pattern: item.pattern || "solid",
     photoType: item.photoType || "flat-lay",
     favorite: Boolean(item.favorite),
     createdAt: new Date().toISOString(),

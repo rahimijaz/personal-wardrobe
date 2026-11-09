@@ -158,3 +158,133 @@ export function detectBodySilhouetteFromImageSrc(imageSrc: string): Promise<Body
   });
 }
 
+export interface PersonaFramingMetrics {
+  zoom: number;
+  xOffset: number;
+  yOffset: number;
+  headTopPct: number;
+  feetBottomPct: number;
+  isSafe: boolean;
+}
+
+/**
+ * Calculates optimal zoom, vertical and horizontal pan offsets from pixel data
+ * so that full figure (head, hair, hands, shoes/sneakers) fits within standard 2:3 VTON frame.
+ */
+export function detectAutoFitFramingFromPixels(
+  data: Uint8Array | Uint8ClampedArray,
+  width: number,
+  height: number
+): PersonaFramingMetrics {
+  const sample = (x: number, y: number) => {
+    const idx = (y * width + x) * 4;
+    return [data[idx], data[idx + 1], data[idx + 2]];
+  };
+  const corners = [
+    sample(2, 2),
+    sample(width - 3, 2),
+    sample(2, height - 3),
+    sample(width - 3, height - 3),
+  ];
+  const bgR = Math.round(corners.map((c) => c[0]).sort((a, b) => a - b)[1]);
+  const bgG = Math.round(corners.map((c) => c[1]).sort((a, b) => a - b)[1]);
+  const bgB = Math.round(corners.map((c) => c[2]).sort((a, b) => a - b)[1]);
+
+  let minY = height,
+    maxY = 0,
+    minX = width,
+    maxX = 0,
+    count = 0;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = (y * width + x) * 4;
+      const dr = Math.abs(data[idx] - bgR);
+      const dg = Math.abs(data[idx + 1] - bgG);
+      const db = Math.abs(data[idx + 2] - bgB);
+      if (dr + dg + db > 25) {
+        count++;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+      }
+    }
+  }
+
+  if (count < 50 || maxY <= minY) {
+    return {
+      zoom: 1.0,
+      xOffset: 0,
+      yOffset: 0,
+      headTopPct: 6,
+      feetBottomPct: 92,
+      isSafe: true,
+    };
+  }
+
+  const personH = (maxY - minY + 1) / height;
+  const personCenterY = (minY + maxY) / (2 * height);
+  const personCenterX = (minX + maxX) / (2 * width);
+
+  // Target: person occupies ~86% of vertical frame (6% head room, 8% shoe room)
+  const targetH = 0.86;
+  const optimalZoom = Math.max(0.6, Math.min(1.4, Math.round((targetH / personH) * 100) / 100));
+
+  // Target center Y: 0.49
+  const optimalYOffset = Math.max(-25, Math.min(25, Math.round((0.49 - personCenterY) * 100)));
+  const optimalXOffset = Math.max(-25, Math.min(25, Math.round((0.5 - personCenterX) * 100)));
+
+  const headTopPct = Math.round((minY / height) * 100);
+  const feetBottomPct = Math.round((maxY / height) * 100);
+  const isSafe = headTopPct >= 4 && feetBottomPct <= 96;
+
+  return {
+    zoom: optimalZoom,
+    xOffset: optimalXOffset,
+    yOffset: optimalYOffset,
+    headTopPct,
+    feetBottomPct,
+    isSafe,
+  };
+}
+
+/**
+ * Loads an image URL and automatically computes optimal zoom, xOffset, and yOffset
+ * to center the persona inside the VTON frame with safe head and foot margins.
+ */
+export function detectAutoFitFramingFromImageSrc(
+  imageSrc: string
+): Promise<PersonaFramingMetrics> {
+  return new Promise((resolve) => {
+    if (typeof window === "undefined" || typeof Image === "undefined") {
+      resolve({ zoom: 1.0, xOffset: 0, yOffset: 0, headTopPct: 6, feetBottomPct: 92, isSafe: true });
+      return;
+    }
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        const w = 128;
+        const h = 192;
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve({ zoom: 1.0, xOffset: 0, yOffset: 0, headTopPct: 6, feetBottomPct: 92, isSafe: true });
+          return;
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        const imgData = ctx.getImageData(0, 0, w, h);
+        const framing = detectAutoFitFramingFromPixels(imgData.data, w, h);
+        resolve(framing);
+      } catch {
+        resolve({ zoom: 1.0, xOffset: 0, yOffset: 0, headTopPct: 6, feetBottomPct: 92, isSafe: true });
+      }
+    };
+    img.onerror = () =>
+      resolve({ zoom: 1.0, xOffset: 0, yOffset: 0, headTopPct: 6, feetBottomPct: 92, isSafe: true });
+    img.src = imageSrc;
+  });
+}
+

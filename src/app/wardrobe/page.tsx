@@ -109,9 +109,11 @@ export default function WardrobePage() {
           const q = searchQuery.toLowerCase().trim();
           const matchName = g.name.toLowerCase().includes(q);
           const matchColor = g.color?.toLowerCase().includes(q);
+          const matchSecondary = g.secondaryColor?.toLowerCase().includes(q);
+          const matchPattern = g.pattern?.toLowerCase().includes(q);
           const matchType = g.type?.toLowerCase().includes(q);
           const matchCat = g.category.toLowerCase().includes(q);
-          if (!matchName && !matchColor && !matchType && !matchCat) {
+          if (!matchName && !matchColor && !matchSecondary && !matchPattern && !matchType && !matchCat) {
             return false;
           }
         }
@@ -434,12 +436,36 @@ export default function WardrobePage() {
                 {/* Info Card */}
                 <div className="p-3.5 flex flex-col justify-between flex-1">
                   <div>
-                    <h3 className="font-semibold text-xs text-ink truncate">
-                      {garment.name}
-                    </h3>
-                    <p className="text-[11px] text-ink-soft mt-0.5 truncate">
-                      {garment.color || garment.type || "Catalog piece"}
-                    </p>
+                    <div className="flex items-center justify-between gap-1.5">
+                      <h3 className="font-semibold text-xs text-ink truncate">
+                        {garment.name}
+                      </h3>
+                      {garment.colorHex && (
+                        <div className="flex items-center -space-x-1 shrink-0" title={`Color: ${garment.color || garment.colorHex}`}>
+                          <span
+                            className="h-3 w-3 rounded-full border border-black/20 z-10"
+                            style={{ backgroundColor: garment.colorHex }}
+                          />
+                          {garment.secondaryColorHex && (
+                            <span
+                              className="h-3 w-3 rounded-full border border-black/20"
+                              style={{ backgroundColor: garment.secondaryColorHex }}
+                              title={`Secondary: ${garment.secondaryColor || garment.secondaryColorHex}`}
+                            />
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <p className="text-[11px] text-ink-soft truncate">
+                        {garment.color || garment.type || "Catalog piece"}
+                      </p>
+                      {garment.pattern && garment.pattern !== "solid" && (
+                        <span className="shrink-0 text-[8px] font-mono px-1 py-0.2 rounded bg-bone border border-line text-ink-soft font-semibold capitalize">
+                          {garment.pattern}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div className="mt-3 flex items-center justify-between border-t border-line/60 pt-2.5">
@@ -508,9 +534,32 @@ export default function WardrobePage() {
                       {garment.name}
                     </h3>
                     <div className="flex items-center gap-2 mt-1 text-xs text-ink-soft">
+                      {garment.colorHex && (
+                        <div className="flex items-center -space-x-1 shrink-0" title={`Color: ${garment.color || garment.colorHex}`}>
+                          <span
+                            className="h-3 w-3 rounded-full border border-black/20 z-10"
+                            style={{ backgroundColor: garment.colorHex }}
+                          />
+                          {garment.secondaryColorHex && (
+                            <span
+                              className="h-3 w-3 rounded-full border border-black/20"
+                              style={{ backgroundColor: garment.secondaryColorHex }}
+                              title={`Secondary: ${garment.secondaryColor || garment.secondaryColorHex}`}
+                            />
+                          )}
+                        </div>
+                      )}
                       <span className="capitalize">{garment.category}</span>
                       <span>•</span>
                       <span>{garment.color || "Standard"}</span>
+                      {garment.pattern && garment.pattern !== "solid" && (
+                        <>
+                          <span>•</span>
+                          <span className="capitalize font-mono text-[10px] bg-bone px-1.5 py-0.2 rounded border border-line text-ink-soft font-semibold">
+                            {garment.pattern}
+                          </span>
+                        </>
+                      )}
                       {garment.type && (
                         <>
                           <span>•</span>

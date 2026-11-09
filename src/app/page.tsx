@@ -451,22 +451,24 @@ export default function DashboardPage() {
                   transition={{ delay: 0.1 + i * 0.08 }}
                   className="group overflow-hidden rounded-3xl border border-line bg-paper card-shadow transition-all duration-200 hover:-translate-y-1"
                 >
-                  <div className="relative aspect-[3/4] w-full overflow-hidden img-zoom">
+                  {/* Card Header: Badges outside the photo so face is 100% unobstructed */}
+                  <div className="flex items-center justify-between px-3.5 py-2.5 bg-paper border-b border-line">
+                    <span className="badge-flame text-[10px] py-0.5 px-2">
+                      <Sparkles className="h-2.5 w-2.5" />
+                      Styled Look
+                    </span>
+                    <span className="text-[10px] font-mono text-ink-soft">
+                      {new Date(outfit.createdAt).toLocaleDateString()}
+                    </span>
+                  </div>
+
+                  {/* Natural 2:3 Portrait Frame with Seamless Studio Fill - Never zooms in or crops any photo */}
+                  <div className="relative aspect-[2/3] w-full overflow-hidden bg-[#fafafa] flex items-center justify-center">
                     <img
                       src={outfit.resultImage}
                       alt={outfit.name}
-                      className="h-full w-full object-cover"
+                      className="h-full w-full object-contain"
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-ink/60 via-transparent to-transparent" />
-                    <div className="absolute top-3 left-3">
-                      <span className="badge-flame">
-                        <Sparkles className="h-2.5 w-2.5" />
-                        Styled Look
-                      </span>
-                    </div>
-                    <span className="absolute bottom-3 left-3 rounded-full bg-ink/80 px-2.5 py-1 text-[11px] font-mono text-bone backdrop-blur-md">
-                      {new Date(outfit.createdAt).toLocaleDateString()}
-                    </span>
                   </div>
 
                   <div className="p-4 flex items-center justify-between">

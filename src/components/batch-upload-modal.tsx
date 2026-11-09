@@ -606,14 +606,31 @@ export function BatchUploadModal({
                         <option value="model">On Model</option>
                       </select>
 
-                      {/* Completed Details (Hex & Label) */}
+                      {/* Completed Details (Hex, Secondary Accent & Label) */}
                       {item.resultGarment?.colorHex && (
-                        <div className="flex items-center gap-1.5 rounded-full border border-line bg-bone px-2 py-0.5 text-[10px] font-mono text-ink">
-                          <span
-                            className="h-2.5 w-2.5 rounded-full border border-black/20"
-                            style={{ backgroundColor: item.resultGarment.colorHex }}
-                          />
-                          <span>{item.resultGarment.color || item.resultGarment.colorHex}</span>
+                        <div className="flex items-center gap-1.5 rounded-full border border-line bg-bone px-2.5 py-0.5 text-[10px] font-mono text-ink">
+                          <div className="flex items-center -space-x-1">
+                            <span
+                              className="h-2.5 w-2.5 rounded-full border border-black/20 z-10"
+                              style={{ backgroundColor: item.resultGarment.colorHex }}
+                              title={`Primary: ${item.resultGarment.colorHex}`}
+                            />
+                            {item.resultGarment.secondaryColorHex && (
+                              <span
+                                className="h-2.5 w-2.5 rounded-full border border-black/20"
+                                style={{ backgroundColor: item.resultGarment.secondaryColorHex }}
+                                title={`Secondary: ${item.resultGarment.secondaryColorHex}`}
+                              />
+                            )}
+                          </div>
+                          <span className="truncate max-w-[160px]">
+                            {item.resultGarment.color || item.resultGarment.colorHex}
+                          </span>
+                          {item.resultGarment.pattern && item.resultGarment.pattern !== "solid" && (
+                            <span className="text-[9px] uppercase tracking-wider text-flame font-bold">
+                              · {item.resultGarment.pattern}
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>

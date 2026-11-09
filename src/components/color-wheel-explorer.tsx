@@ -19,6 +19,9 @@ import {
   Upload,
   ChevronLeft,
   ChevronRight,
+  Shuffle,
+  ArrowLeftRight,
+  RotateCcw,
 } from "lucide-react";
 import clsx from "clsx";
 import { useWardrobe } from "@/context/wardrobe-context";
@@ -119,12 +122,44 @@ const segmentPath = (i: number) => {
   return `M${x1} ${y1}A${R_OUT} ${R_OUT} 0 0 1 ${x2} ${y2}L${x3} ${y3}A${R_IN} ${R_IN} 0 0 0 ${x4} ${y4}Z`;
 };
 
-const isWearablePair = (catA: GarmentCategory, catB: GarmentCategory) => {
-  if (catA === "tops" && catB === "bottoms") return true;
-  if (catA === "bottoms" && catB === "tops") return true;
-  if (catA === "one-pieces" && (catB === "shoes" || catB === "accessories")) return true;
-  if ((catA === "shoes" || catA === "accessories") && catB === "one-pieces") return true;
+const isWearablePair = (catA: GarmentCategory, catB: GarmentCategory): boolean => {
+  // Tops & outerwear pair strictly with Bottoms
+  if ((catA === "tops" || catA === "outerwear") && catB === "bottoms") return true;
+  if (catA === "bottoms" && (catB === "tops" || catB === "outerwear")) return true;
+
+  // One-pieces / Dresses pair with shoes, accessories, or outerwear layers
+  if (
+    (catA === "one-pieces" || catA === "dresses") &&
+    (catB === "shoes" || catB === "accessories" || catB === "outerwear")
+  )
+    return true;
+  if (
+    (catA === "shoes" || catA === "accessories" || catA === "outerwear") &&
+    (catB === "one-pieces" || catB === "dresses")
+  )
+    return true;
+
+  // Shoes & Accessories can pair with Tops or Bottoms
+  if (
+    (catA === "shoes" || catA === "accessories") &&
+    (catB === "tops" || catB === "bottoms")
+  )
+    return true;
+  if (
+    (catA === "tops" || catA === "bottoms") &&
+    (catB === "shoes" || catB === "accessories")
+  )
+    return true;
+
   return false;
+};
+
+const getTargetCategoryLabel = (anchorCat?: GarmentCategory): string => {
+  if (!anchorCat) return "Bottoms";
+  if (anchorCat === "tops" || anchorCat === "outerwear") return "Bottoms";
+  if (anchorCat === "bottoms") return "Tops";
+  if (anchorCat === "one-pieces" || anchorCat === "dresses") return "Layers & Accessories";
+  return "Pieces";
 };
 
 export function ColorWheelExplorer() {
@@ -255,29 +290,42 @@ export function ColorWheelExplorer() {
       });
   }, [activeAnchor, garmentNodes, activeVibe]);
 
-  // Selected pairing preview
+  // Selected pairing preview (strictly enforces wearable pairs e.g. Bottoms for Tops)
   const activeMatch = useMemo(() => {
+    // 1. If user explicitly clicked a match card, check if it fits the active pairing filter
     if (selectedMatchId) {
       const found = matchResults.find((m) => m.node.garment.id === selectedMatchId);
-      if (found) return found;
+      if (found) {
+        if (pairFilter !== "wearable" || found.wearable) return found;
+      }
     }
-    // Prefer a piece that matches vibe and is a wearable pair
+
+    // 2. In wearable mode: strictly pick the best matching opposite category item (e.g. Bottoms for Tops)
+    if (pairFilter === "wearable") {
+      const bestWearableVibe = matchResults.find((m) => m.wearable && m.matchesVibe);
+      if (bestWearableVibe) return bestWearableVibe;
+
+      const anyWearable = matchResults.find((m) => m.wearable);
+      if (anyWearable) return anyWearable;
+
+      return null;
+    }
+
+    // 3. In "all" mode: pick vibe match or first match
     return (
-      matchResults.find((m) => m.matchesVibe && m.wearable) ||
       matchResults.find((m) => m.matchesVibe) ||
       matchResults[0] ||
       null
     );
-  }, [selectedMatchId, matchResults]);
+  }, [selectedMatchId, matchResults, pairFilter]);
 
   // Filtered match list (narrowed by slice click and wearable toggle)
   const visibleMatches = useMemo(() => {
     let list = matchResults;
 
     if (pairFilter === "wearable") {
-      const wearableList = list.filter((m) => m.wearable);
-      // Fallback to all if user doesn't own any wearable pieces in that category yet
-      if (wearableList.length > 0) list = wearableList;
+      // STRICT FILTER: Only show true wearable pairs (Tops match with Bottoms, Bottoms match with Tops)
+      list = list.filter((m) => m.wearable);
     }
 
     if (hueFilter === null) return list;
@@ -289,12 +337,14 @@ export function ColorWheelExplorer() {
   const segCounts = useMemo(() => {
     const counts = new Array(SEGMENTS).fill(0) as number[];
     let neutral = 0;
-    matchResults.forEach(({ node }) => {
+    // In wearable mode, the wheel slices and badges count the pieces you can actually wear with this item
+    const pool = pairFilter === "wearable" ? matchResults.filter((m) => m.wearable) : matchResults;
+    pool.forEach(({ node }) => {
       if (node.isNeutral) neutral++;
       else counts[node.seg]++;
     });
     return { counts, neutral };
-  }, [matchResults]);
+  }, [matchResults, pairFilter]);
 
   const stylistTip = useMemo(() => {
     if (!activeAnchor || !activeMatch) return "";
@@ -342,6 +392,7 @@ export function ColorWheelExplorer() {
     return `/try-on?garmentId=${g1.id}`;
   }, [activeAnchor, activeMatch]);
 
+  const targetCatLabel = getTargetCategoryLabel(activeAnchor?.garment.category);
   const vibe = VIBE_OPTIONS.find((v) => v.id === activeVibe)!;
   const anchorSeg = activeAnchor && !activeAnchor.isNeutral ? activeAnchor.seg : -1;
   const matchSeg = activeMatch && !activeMatch.node.isNeutral ? activeMatch.node.seg : -1;
@@ -360,6 +411,19 @@ export function ColorWheelExplorer() {
     setSelectedGarmentId(id);
     setSelectedMatchId(null);
     setHueFilter(null);
+  };
+
+  const pickRandomAnchor = () => {
+    if (garments.length === 0) return;
+    const pool = filteredRack.length > 0 ? filteredRack : garments;
+    const randomIndex = Math.floor(Math.random() * pool.length);
+    pickAnchor(pool[randomIndex].id);
+  };
+
+  const swapAnchorAndMatch = () => {
+    if (activeMatch) {
+      pickAnchor(activeMatch.node.garment.id);
+    }
   };
 
   const filterLabel =
@@ -405,7 +469,7 @@ export function ColorWheelExplorer() {
                 Choose the piece you want to wear today
               </h2>
               <p className="text-xs text-ink-soft">
-                Pick any item from your closet to see what colors and clothes match it best
+                Pick a Top to find matching Bottoms, or pick a Bottom to find matching Tops
               </p>
             </div>
           </div>
@@ -428,8 +492,18 @@ export function ColorWheelExplorer() {
               ))}
             </div>
 
-            {/* Header Arrow Navigation */}
-            <div className="flex items-center gap-1 pl-1.5 border-l border-line shrink-0">
+            {/* Surprise Me & Header Arrow Navigation */}
+            <div className="flex items-center gap-1.5 pl-1.5 border-l border-line shrink-0">
+              <button
+                type="button"
+                onClick={pickRandomAnchor}
+                className="inline-flex items-center gap-1.5 rounded-full border border-flame/30 bg-flame/10 px-2.5 py-1 text-xs font-semibold text-flame hover:bg-flame hover:text-white transition-all cursor-pointer shadow-2xs"
+                title="Shuffle: Pick a random piece from your closet"
+              >
+                <Shuffle className="h-3 w-3" />
+                <span className="hidden sm:inline">Surprise Me</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => scrollRack("left")}
@@ -507,10 +581,18 @@ export function ColorWheelExplorer() {
                       alt={g.name}
                       className="h-full w-full object-cover group-hover:scale-105 transition-transform"
                     />
-                    <div
-                      className="absolute bottom-1 right-1 h-3.5 w-3.5 rounded-full border border-black/20"
-                      style={{ backgroundColor: hex }}
-                    />
+                    <div className="absolute bottom-1 right-1 flex items-center -space-x-1">
+                      <span
+                        className="h-3.5 w-3.5 rounded-full border border-black/20 z-10 shadow-xs"
+                        style={{ backgroundColor: hex }}
+                      />
+                      {g.secondaryColorHex && (
+                        <span
+                          className="h-3.5 w-3.5 rounded-full border border-black/20 shadow-xs"
+                          style={{ backgroundColor: g.secondaryColorHex }}
+                        />
+                      )}
+                    </div>
                     {isSelected && (
                       <div className="absolute top-1 left-1 bg-flame text-white rounded-full p-0.5 shadow-xs">
                         <Check className="h-3 w-3 stroke-[3]" />
@@ -546,73 +628,71 @@ export function ColorWheelExplorer() {
         </div>
       </div>
 
-      {/* ── STEP 2: CHOOSE YOUR STYLING VIBE ── */}
-      <div className="space-y-3">
-        <div className="flex items-center gap-2.5">
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-flame text-white font-mono text-xs font-bold">
-            2
-          </span>
-          <div>
-            <h2 className="font-display text-lg sm:text-xl font-bold text-ink">
-              Choose your styling vibe
-            </h2>
-            <p className="text-xs text-ink-soft">
-              Select how much contrast or harmony you want in your look
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-          {VIBE_OPTIONS.map((v) => {
-            const Icon = v.icon;
-            const isSelected = activeVibe === v.id;
-            return (
-              <button
-                key={v.id}
-                onClick={() => {
-                  setActiveVibe(v.id);
-                  setSelectedMatchId(null);
-                  setHueFilter(null);
-                }}
-                className={clsx(
-                  "flex flex-col p-3.5 rounded-2xl border text-left transition-all duration-200 cursor-pointer",
-                  isSelected
-                    ? "border-flame bg-paper ring-2 ring-flame shadow-md -translate-y-0.5"
-                    : "border-line bg-paper hover:bg-bone hover:border-flame/30"
-                )}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <div className={clsx("p-2 rounded-xl border", v.color)}>
-                    <Icon className="h-4 w-4" />
-                  </div>
-                  {isSelected && <span className="h-2 w-2 rounded-full bg-flame" />}
-                </div>
-                <span className="text-xs font-bold text-ink">{v.label}</span>
-                <span className="text-[11px] text-flame font-medium mt-0.5">{v.tagline}</span>
-                <p className="text-[10px] text-ink-soft mt-1.5 leading-snug line-clamp-2">
-                  {v.desc}
-                </p>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ── STEP 3: WHEEL + MATCHES ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* LEFT: THE COLOR WHEEL */}
-        <div className="lg:col-span-5">
-          <div className="rounded-3xl border border-line bg-paper p-5 sm:p-6 shadow-sm">
-            <div className="mb-1 flex items-baseline justify-between gap-3">
-              <h3 className="font-display text-base font-bold text-ink">Colors that work</h3>
-              <span className="text-[11px] text-ink-soft">Tap a slice to filter pieces</span>
+      {/* ── 2-COLUMN UNIFIED STUDIO GRID: VIBE + WHEEL (Left) | OUTFIT MATCH & CLOSET (Right) ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* LEFT: COLOR HARMONY ENGINE (Vibe Selector + Color Wheel) */}
+        <div className="lg:col-span-5 space-y-4">
+          <div className="rounded-3xl border border-line bg-paper p-5 sm:p-6 shadow-sm space-y-4">
+            {/* Engine Header */}
+            <div className="flex items-center justify-between pb-2 border-b border-line">
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-flame text-white font-mono text-xs font-bold">
+                  2
+                </span>
+                <h3 className="font-display text-base font-bold text-ink">
+                  Styling Mood &amp; Wheel
+                </h3>
+              </div>
+              <span className="text-[10px] font-mono font-semibold text-ink-soft bg-bone px-2 py-0.5 rounded-full border border-line">
+                Tap slice to filter
+              </span>
             </div>
-            <p className="text-xs text-ink-soft mb-3">
-              Bright slices match your piece for <strong className="text-ink">{vibe.label}</strong>.
-              Badges show how many matching pieces you own.
-            </p>
 
-            <div className="mx-auto w-full max-w-[380px]">
+            {/* Compact Vibe Selector Pill Strip */}
+            <div className="space-y-2">
+              <div className="grid grid-cols-5 gap-1 p-1 bg-bone rounded-2xl border border-line">
+                {VIBE_OPTIONS.map((v) => {
+                  const Icon = v.icon;
+                  const isSelected = activeVibe === v.id;
+                  return (
+                    <button
+                      key={v.id}
+                      type="button"
+                      onClick={() => {
+                        setActiveVibe(v.id);
+                        setSelectedMatchId(null);
+                        setHueFilter(null);
+                      }}
+                      className={clsx(
+                        "flex flex-col items-center justify-center py-2 px-1 rounded-xl text-center transition-all cursor-pointer",
+                        isSelected
+                          ? "bg-paper text-ink shadow-2xs border border-line font-bold"
+                          : "text-ink-soft hover:text-ink hover:bg-bone-deep"
+                      )}
+                      title={`${v.label} - ${v.desc}`}
+                    >
+                      <Icon className={clsx("h-3.5 w-3.5 mb-1", isSelected ? "text-flame" : "text-ink-soft")} />
+                      <span className="text-[10px] sm:text-[11px] font-semibold leading-tight truncate w-full">
+                        {v.label.split(" ")[0]}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Dynamic 1-line Vibe Explainer */}
+              <div className="flex items-center justify-between text-[11px] px-1 text-ink-soft leading-tight">
+                <span className="truncate">
+                  <strong className="text-ink font-semibold">{vibe.label}:</strong> {vibe.desc}
+                </span>
+                <span className="text-flame font-mono text-[10px] font-bold uppercase shrink-0 ml-2">
+                  {vibe.tagline}
+                </span>
+              </div>
+            </div>
+
+            {/* The SVG Color Wheel */}
+            <div className="mx-auto w-full max-w-[340px]">
               <svg
                 viewBox="0 0 400 400"
                 className="w-full h-auto select-none overflow-visible"
@@ -844,8 +924,11 @@ export function ColorWheelExplorer() {
                     style={{ backgroundColor: `hsl(${hoveredSeg * 30} 72% 54%)` }}
                   />
                   <span>
-                    {SEGMENT_NAMES[hoveredSeg]} Family · {segCounts.counts[hoveredSeg]} piece
-                    {segCounts.counts[hoveredSeg] === 1 ? "" : "s"} in closet
+                    {SEGMENT_NAMES[hoveredSeg]} Family · {segCounts.counts[hoveredSeg]}{" "}
+                    {pairFilter === "wearable"
+                      ? targetCatLabel.toLowerCase()
+                      : "piece" + (segCounts.counts[hoveredSeg] === 1 ? "" : "s")}{" "}
+                    in closet
                   </span>
                 </span>
               )}
@@ -873,7 +956,10 @@ export function ColorWheelExplorer() {
                     />
                   ))}
                 </span>
-                <span>Neutrals · {segCounts.neutral}</span>
+                <span>
+                  Neutrals · {segCounts.neutral}{" "}
+                  {pairFilter === "wearable" ? targetCatLabel.toLowerCase() : ""}
+                </span>
                 {neutralVibe && <Check className="h-3.5 w-3.5 text-emerald-600" />}
               </button>
             </div>
@@ -914,15 +1000,26 @@ export function ColorWheelExplorer() {
         <div className="lg:col-span-7 space-y-6">
           {/* Active Featured Outfit Pairing Card */}
           {activeAnchor && activeMatch && (
-            <div className="rounded-3xl border border-line bg-paper p-6 shadow-md space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="rounded-3xl border border-line bg-paper p-5 sm:p-6 shadow-md space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-line">
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 text-xs font-bold text-emerald-800 dark:text-emerald-300">
                   <TrendingUp className="h-3.5 w-3.5" />
                   <span>{activeMatch.score}% harmony match</span>
                   <span>·</span>
                   <span>{activeMatch.relation}</span>
                 </span>
-                <span className="text-xs text-ink-soft">Outfit preview</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={swapAnchorAndMatch}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-line bg-bone px-2.5 py-1 text-xs font-semibold text-ink hover:bg-bone-deep hover:text-flame transition-colors cursor-pointer shadow-2xs"
+                    title="Make this match your new anchor piece to see what goes with it"
+                  >
+                    <ArrowLeftRight className="h-3 w-3" />
+                    <span>Swap Anchor</span>
+                  </button>
+                  <span className="text-xs text-ink-soft hidden sm:inline">Outfit preview</span>
+                </div>
               </div>
 
               {/* Side-by-side Top & Bottom Cards */}
@@ -930,13 +1027,13 @@ export function ColorWheelExplorer() {
                 {[
                   {
                     n: activeAnchor,
-                    label: "Your piece",
+                    label: `Your piece (${activeAnchor.garment.category})`,
                     tone: "border-line bg-bone",
                     lc: "text-flame",
                   },
                   {
                     n: activeMatch.node,
-                    label: "Recommended match",
+                    label: `Matching ${activeMatch.wearable ? targetCatLabel.slice(0, -1).toLowerCase() : "piece"} (${activeMatch.node.garment.category})`,
                     tone: "border-emerald-500/30 bg-emerald-500/5",
                     lc: "text-emerald-700 dark:text-emerald-300",
                   },
@@ -951,10 +1048,18 @@ export function ColorWheelExplorer() {
                         alt={n.garment.name}
                         className="h-full w-full object-cover"
                       />
-                      <div
-                        className="absolute bottom-1 right-1 h-3.5 w-3.5 rounded-full border border-black/20"
-                        style={{ backgroundColor: n.hex }}
-                      />
+                      <div className="absolute bottom-1 right-1 flex items-center -space-x-1">
+                        <span
+                          className="h-3.5 w-3.5 rounded-full border border-black/20 z-10 shadow-xs"
+                          style={{ backgroundColor: n.hex }}
+                        />
+                        {n.garment.secondaryColorHex && (
+                          <span
+                            className="h-3.5 w-3.5 rounded-full border border-black/20 shadow-xs"
+                            style={{ backgroundColor: n.garment.secondaryColorHex }}
+                          />
+                        )}
+                      </div>
                     </div>
                     <span className={clsx("text-[11px] font-bold uppercase tracking-wider", lc)}>
                       {label}
@@ -986,11 +1091,27 @@ export function ColorWheelExplorer() {
             </div>
           )}
 
+          {activeAnchor && !activeMatch && (
+            <div className="rounded-3xl border border-line bg-paper p-6 text-center space-y-3 shadow-xs">
+              <div className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-bone text-ink-soft mx-auto">
+                <Sparkles className="h-6 w-6 text-flame" />
+              </div>
+              <h3 className="font-display text-base font-bold text-ink">
+                No matching {targetCatLabel.toLowerCase()} found
+              </h3>
+              <p className="text-xs text-ink-soft max-w-sm mx-auto">
+                You don’t currently have any {targetCatLabel.toLowerCase()} in your wardrobe to pair with this {activeAnchor.garment.category.replace(/s$/, "")}. Try switching to &ldquo;All items&rdquo; or add new pieces in your closet!
+              </p>
+            </div>
+          )}
+
           {/* More Matches List */}
           <div className="space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <h3 className="font-display text-base font-bold text-ink">
-                {filterLabel ? `${filterLabel} pieces in your closet` : "Other pieces in your closet"}
+                {filterLabel
+                  ? `${filterLabel} ${pairFilter === "wearable" ? targetCatLabel.toLowerCase() : "pieces"} in your closet`
+                  : `Matching ${pairFilter === "wearable" ? targetCatLabel.toLowerCase() : "pieces"} in your closet`}
               </h3>
 
               <div className="flex items-center gap-2">
@@ -999,18 +1120,19 @@ export function ColorWheelExplorer() {
                   <button
                     onClick={() => setPairFilter("wearable")}
                     className={clsx(
-                      "px-2.5 py-0.5 rounded-full font-semibold transition-all cursor-pointer",
+                      "px-3 py-1 rounded-full font-semibold transition-all cursor-pointer flex items-center gap-1.5",
                       pairFilter === "wearable"
                         ? "bg-ink text-bone shadow-2xs"
                         : "text-ink-soft hover:text-ink"
                     )}
                   >
-                    Wearable pairs
+                    {pairFilter === "wearable" && <Check className="h-3 w-3" />}
+                    <span>Wearable pairs ({targetCatLabel})</span>
                   </button>
                   <button
                     onClick={() => setPairFilter("all")}
                     className={clsx(
-                      "px-2.5 py-0.5 rounded-full font-semibold transition-all cursor-pointer",
+                      "px-3 py-1 rounded-full font-semibold transition-all cursor-pointer",
                       pairFilter === "all"
                         ? "bg-ink text-bone shadow-2xs"
                         : "text-ink-soft hover:text-ink"
@@ -1032,8 +1154,23 @@ export function ColorWheelExplorer() {
             </div>
 
             {visibleMatches.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-line p-6 text-center text-xs text-ink-soft">
-                You don’t own any matching pieces in this category yet. Tap another slice or switch to &ldquo;All items&rdquo;.
+              <div className="rounded-2xl border border-dashed border-line p-6 text-center text-xs text-ink-soft space-y-2">
+                <p>
+                  You don’t own any matching{" "}
+                  <span className="font-semibold text-ink">
+                    {pairFilter === "wearable" ? targetCatLabel.toLowerCase() : "pieces"}
+                  </span>{" "}
+                  in {filterLabel ? `the ${filterLabel} color spectrum` : "this category"} yet.
+                </p>
+                {hueFilter !== null && (
+                  <button
+                    onClick={() => setHueFilter(null)}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-bone border border-line px-3 py-1.5 text-xs font-semibold text-ink hover:bg-bone-deep cursor-pointer"
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                    <span>View all {pairFilter === "wearable" ? targetCatLabel.toLowerCase() : "colors"}</span>
+                  </button>
+                )}
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">

@@ -331,16 +331,24 @@ function TryOnContent() {
           className="rounded-3xl border border-line bg-paper p-6 sm:p-8 shadow-sm mb-10"
         >
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-            {/* Prominent High-Res Result Image */}
+            {/* Prominent High-Res Result Image - Natural 2:3 Edge-to-Edge Portrait Framing */}
             <div className="lg:col-span-7 flex flex-col items-center">
-              <div className="relative aspect-[3/4] w-full max-w-md overflow-hidden rounded-2xl border border-line bg-bone-deep shadow-lg">
-                <img
-                  src={activeJob.result!}
-                  alt="Generated Virtual Try-On Result"
-                  className="h-full w-full object-cover"
-                />
-                <div className="absolute top-3 left-3 rounded-full bg-ink/80 px-3 py-1 text-xs font-mono text-bone backdrop-blur-md">
-                  Tailored Look
+              <div className="w-full max-w-sm rounded-3xl border border-line bg-paper overflow-hidden shadow-xl card-shadow">
+                <div className="flex items-center justify-between px-4 py-2.5 bg-paper border-b border-line">
+                  <span className="badge-flame text-[10px] py-0.5 px-2">
+                    <Sparkles className="h-2.5 w-2.5" />
+                    Tailored Result
+                  </span>
+                  <span className="text-[10px] font-mono text-ink-soft">
+                    1024 × 1536 HD
+                  </span>
+                </div>
+                <div className="relative aspect-[2/3] w-full overflow-hidden bg-[#fafafa] flex items-center justify-center">
+                  <img
+                    src={activeJob.result!}
+                    alt="Generated Virtual Try-On Result"
+                    className="h-full w-full object-contain"
+                  />
                 </div>
               </div>
             </div>
@@ -761,7 +769,7 @@ function TryOnContent() {
               </div>
 
               {selectedPerson ? (
-                <div className="relative aspect-[3/4] w-full overflow-hidden rounded-2xl border border-line bg-bone-deep group">
+                <div className="relative aspect-[2/3] w-full overflow-hidden rounded-2xl border border-line bg-bone-deep group">
                   <img
                     src={selectedPerson.image}
                     alt={selectedPerson.name}
@@ -773,7 +781,7 @@ function TryOnContent() {
                           }
                         : undefined
                     }
-                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-102"
+                    className="h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-102"
                   />
                   <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-ink/90 via-ink/40 to-transparent p-4 text-bone">
                     <div className="flex items-center justify-between">
@@ -800,7 +808,7 @@ function TryOnContent() {
               ) : (
                 <div
                   onClick={() => setIsPersonPickerOpen(true)}
-                  className="aspect-[3/4] w-full rounded-2xl border-2 border-dashed border-line bg-bone flex flex-col items-center justify-center p-8 text-center cursor-pointer hover:border-ink transition-colors"
+                  className="aspect-[2/3] w-full rounded-2xl border-2 border-dashed border-line bg-bone flex flex-col items-center justify-center p-8 text-center cursor-pointer hover:border-ink transition-colors"
                 >
                   <User className="h-10 w-10 text-ink-soft mb-2" />
                   <p className="text-xs sm:text-sm font-semibold text-ink">
@@ -1193,7 +1201,7 @@ function TryOnContent() {
                       : "border-line bg-bone hover:border-ink/50"
                   )}
                 >
-                  <div className="relative aspect-[3/4] w-full overflow-hidden rounded-xl bg-bone-deep">
+                  <div className="relative aspect-[2/3] w-full overflow-hidden rounded-xl bg-bone-deep">
                     <img
                       src={p.image}
                       alt={p.name}
@@ -1205,7 +1213,7 @@ function TryOnContent() {
                             }
                           : undefined
                       }
-                      className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
+                      className="h-full w-full object-cover object-top transition-transform duration-200 group-hover:scale-105"
                     />
                     {p.calibration?.score && (
                       <div className="absolute bottom-1.5 right-1.5 rounded-md bg-ink/80 px-1.5 py-0.5 text-[9px] font-mono text-bone backdrop-blur-xs">

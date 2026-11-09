@@ -35,6 +35,7 @@ export const CATEGORY_SINGLE: Record<Category, string> = {
 };
 
 export type GarmentPhotoType = "flat-lay" | "model";
+export type GarmentPattern = "solid" | "striped" | "patterned" | "check" | "graphic" | "multicolor";
 
 export interface Garment {
   id: string;
@@ -44,6 +45,10 @@ export interface Garment {
   type?: string;
   color?: string;
   colorHex?: string;
+  secondaryColor?: string;
+  secondaryColorHex?: string;
+  accentColors?: string[];
+  pattern?: GarmentPattern;
   photoType: GarmentPhotoType;
   favorite: boolean;
   createdAt: string;

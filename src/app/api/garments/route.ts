@@ -4,7 +4,7 @@ import { paletteFromFile, detectCategoryFromFile } from "@/server/images";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import type { GarmentCategory, GarmentPhotoType } from "@/lib/types";
+import type { GarmentCategory, GarmentPhotoType, GarmentPattern } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +27,10 @@ export async function POST(req: Request) {
     let type = "";
     let color = "";
     let colorHex = "";
+    let secondaryColor = "";
+    let secondaryColorHex = "";
+    let accentColors: string[] = [];
+    let pattern: GarmentPattern = "solid";
     let image = "";
     let diskFilePath = "";
     let isExplicitCategory = false;
@@ -40,6 +44,9 @@ export async function POST(req: Request) {
       type = (formData.get("type") as string) || "";
       color = (formData.get("color") as string) || "";
       colorHex = (formData.get("colorHex") as string) || "";
+      secondaryColor = (formData.get("secondaryColor") as string) || "";
+      secondaryColorHex = (formData.get("secondaryColorHex") as string) || "";
+      pattern = ((formData.get("pattern") as GarmentPattern) || "solid");
 
       const file = formData.get("image");
       if (file instanceof File) {
@@ -65,6 +72,10 @@ export async function POST(req: Request) {
       type = body.type || "";
       color = body.color || "";
       colorHex = body.colorHex || "";
+      secondaryColor = body.secondaryColor || "";
+      secondaryColorHex = body.secondaryColorHex || "";
+      if (body.accentColors) accentColors = body.accentColors;
+      pattern = body.pattern || "solid";
       image = body.image || "";
     }
 
@@ -94,7 +105,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // Automated Dominant Color & Silhouette Category Extraction via Sharp
+    // Automated Dominant & Secondary Color, Pattern, & Silhouette Category Extraction via Sharp
     // Runs for all uploads (multipart, cutouts, base64, and files)
     if (diskFilePath && fs.existsSync(diskFilePath)) {
       try {
@@ -103,7 +114,17 @@ export async function POST(req: Request) {
           colorHex = extracted.dominant;
         }
         if (!color || color === "Jet black") {
-          color = extracted.colorName;
+          color = extracted.compositeColorName || extracted.colorName;
+        }
+        if (!secondaryColorHex && extracted.secondary) {
+          secondaryColorHex = extracted.secondary;
+          secondaryColor = extracted.secondaryColorName || "";
+        }
+        if (accentColors.length === 0 && extracted.palette) {
+          accentColors = extracted.palette;
+        }
+        if (pattern === "solid" && extracted.pattern) {
+          pattern = extracted.pattern;
         }
       } catch (e) {
         console.warn("Auto color extraction failed, using manual or default values:", e);
@@ -141,6 +162,10 @@ export async function POST(req: Request) {
       type,
       color,
       colorHex,
+      secondaryColor: secondaryColor || undefined,
+      secondaryColorHex: secondaryColorHex || undefined,
+      accentColors: accentColors.length > 0 ? accentColors : undefined,
+      pattern,
       image,
       favorite: false,
     });

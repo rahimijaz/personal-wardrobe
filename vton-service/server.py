@@ -125,6 +125,79 @@ def _process_background_removal(pil_img):
     return result
 
 
+def auto_frame_person_for_vton(
+    img,
+    target_w: int = 1024,
+    target_h: int = 1536,
+    target_person_height_ratio: float = 0.90,
+):
+    """Detects person silhouette and scales/centers them on a 2:3 canvas so no head, arms, or shoes are cut off."""
+    import numpy as np
+    from PIL import Image
+
+    try:
+        img_rgb = img.convert("RGB")
+        np_img = np.array(img_rgb)
+        H, W, _ = np_img.shape
+
+        sample_size = max(5, min(15, H // 10, W // 10))
+        corners = np.concatenate([
+            np_img[:sample_size, :sample_size].reshape(-1, 3),
+            np_img[:sample_size, -sample_size:].reshape(-1, 3),
+            np_img[-sample_size:, :sample_size].reshape(-1, 3),
+            np_img[-sample_size:, -sample_size:].reshape(-1, 3),
+        ], axis=0)
+        bg_color = tuple(np.median(corners, axis=0).astype(int))
+
+        diff = np.sum(np.abs(np_img.astype(np.int32) - bg_color), axis=2)
+        is_fg = diff > 24
+
+        fg_rows = np.where(np.any(is_fg, axis=1))[0]
+        fg_cols = np.where(np.any(is_fg, axis=0))[0]
+
+        if len(fg_rows) < 50 or len(fg_cols) < 20:
+            min_y, max_y = 0, H - 1
+            min_x, max_x = 0, W - 1
+        else:
+            min_y, max_y = int(fg_rows[0]), int(fg_rows[-1])
+            min_x, max_x = int(fg_cols[0]), int(fg_cols[-1])
+
+        person_h = max_y - min_y + 1
+        person_w = max_x - min_x + 1
+
+        top_margin_pct = min_y / H
+        bottom_margin_pct = (H - 1 - max_y) / H
+        current_aspect = W / H
+        target_aspect = target_w / target_h
+
+        is_already_2_3 = abs(current_aspect - target_aspect) < 0.02
+        has_safe_margins = top_margin_pct >= 0.035 and bottom_margin_pct >= 0.025
+        if is_already_2_3 and has_safe_margins and W >= 800 and H >= 1200:
+            return img_rgb
+
+        target_person_h = target_h * target_person_height_ratio
+        target_person_w = target_w * 0.82
+        scale = min(target_person_h / max(1, person_h), target_person_w / max(1, person_w))
+
+        new_w = max(1, int(round(W * scale)))
+        new_h = max(1, int(round(H * scale)))
+        scaled = img_rgb.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+        scaled_min_x = int(round(min_x * scale))
+        scaled_max_x = int(round(max_x * scale))
+        scaled_min_y = int(round(min_y * scale))
+
+        paste_x = (target_w // 2) - ((scaled_min_x + scaled_max_x) // 2)
+        paste_y = int(target_h * 0.05) - scaled_min_y
+
+        canvas = Image.new("RGB", (target_w, target_h), bg_color)
+        canvas.paste(scaled, (paste_x, paste_y))
+        print(f"[AutoFrame] Person auto-scaled ({person_w}x{person_h} in {W}x{H} -> {target_w}x{target_h}) with safe 5% head/foot margins.")
+        return canvas
+    except Exception as e:
+        print(f"[auto_frame_person] Fallback due to: {e}")
+        return img
+
 
 def _worker_loop():
     """Background worker processing VTON jobs one-by-one."""
@@ -218,7 +291,12 @@ def _worker_loop():
             guidance = job["params"].get("guidance_scale")
             seed = job["params"].get("seed")
 
-            current_img = person_img
+            # Intelligently auto-frame the persona onto standard 2:3 canvas respecting calibrated specs
+            persona_specs = job["params"].get("persona_specs") or {}
+            target_ratio = 1.15 if persona_specs.get("framing") == "three-quarters" else 0.88
+            spec_info = f"{persona_specs.get('height_cm', 175)}cm • {str(persona_specs.get('body_silhouette', 'regular')).title()} • {persona_specs.get('posture', 'standing-frontal')} • {persona_specs.get('lighting', 'studio-neutral')}" if persona_specs else "Standard calibrated"
+            update_stage("preparing_person", step=0, total_steps=overall_total_steps, detail=f"Framing persona ({spec_info}) with safe head & foot margins on 2:3 canvas...")
+            current_img = auto_frame_person_for_vton(person_img, target_person_height_ratio=target_ratio)
 
             for pass_idx, g_item in enumerate(garments_list, start=1):
                 with _JOBS_LOCK:

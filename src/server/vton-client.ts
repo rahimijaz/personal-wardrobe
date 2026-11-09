@@ -231,6 +231,13 @@ export async function submitTryOnJob({
     const payload = {
       person: personBuf.toString("base64"),
       garments: garmentsPayload,
+      persona_specs: {
+        height_cm: person.calibration?.heightCm ?? 175,
+        body_silhouette: person.calibration?.bodySilhouette ?? "regular",
+        posture: person.calibration?.posture ?? "standing-frontal",
+        framing: person.calibration?.framing ?? "full-body",
+        lighting: person.calibration?.lighting ?? "studio-neutral",
+      },
       num_timesteps: singlePassSteps,
       skip_cfg_last_n_steps: params?.skipCfgLastNSteps ?? 5,
       guidance_scale: params?.guidanceScale ?? 2.0,

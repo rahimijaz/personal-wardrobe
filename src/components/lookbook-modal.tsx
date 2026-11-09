@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
+import { toPng, toBlob } from "html-to-image";
 import {
   Share2,
   Download,
@@ -27,6 +29,45 @@ import { nearestColorName } from "@/lib/colors";
 export type LookbookTheme = "noir" | "alabaster" | "terracotta";
 export type LookbookRatio = "4:5" | "9:16" | "1:1";
 
+// Helper for generating fun aesthetic badges & style quotes
+function getFunVibe(relation?: string, score?: number) {
+  if (!relation) {
+    return {
+      badge: "🔥 10/10 FIT CHECK",
+      tagline: "Effortless confidence & timeless everyday style.",
+    };
+  }
+  const r = relation.toLowerCase();
+  if (r.includes("monochrome") || r.includes("neutral")) {
+    return {
+      badge: "⚡ MINIMALIST MOOD",
+      tagline: "Understated luxury. Clean tonal harmony & dialed proportions.",
+    };
+  }
+  if (r.includes("analogous") || r.includes("harmonious")) {
+    return {
+      badge: "✨ SMOOTH PALETTE",
+      tagline: "Effortless synergy. Colors flow naturally across the silhouette.",
+    };
+  }
+  if (r.includes("complementary") || r.includes("contrast")) {
+    return {
+      badge: "💥 BOLD CONTRAST",
+      tagline: "High-energy styling with striking, intentional balance.",
+    };
+  }
+  if (score && score >= 90) {
+    return {
+      badge: "🔥 CERTIFIED DRIP",
+      tagline: "Impeccable balance. Every piece hits the exact right frequency.",
+    };
+  }
+  return {
+    badge: "✨ TODAY'S FIT",
+    tagline: "Curated ensemble with distinct personal character.",
+  };
+}
+
 interface LookbookModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -34,6 +75,7 @@ interface LookbookModalProps {
 }
 
 export function LookbookModal({ isOpen, onClose, outfit }: LookbookModalProps) {
+  const [mounted, setMounted] = useState(false);
   const [theme, setTheme] = useState<LookbookTheme>("noir");
   const [ratio, setRatio] = useState<LookbookRatio>("4:5");
   const [customTitle, setCustomTitle] = useState("");
@@ -43,6 +85,25 @@ export function LookbookModal({ isOpen, onClose, outfit }: LookbookModalProps) {
   const [copySuccess, setCopySuccess] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  // Mount guard for React Portal
+  useEffect(() => {
+    setMounted(true);
+    return () => setMounted(false);
+  }, []);
+
+  // Prevent background page from scrolling while modal is open
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isOpen]);
 
   // Initialize custom title whenever outfit changes
   useEffect(() => {
@@ -69,6 +130,24 @@ export function LookbookModal({ isOpen, onClose, outfit }: LookbookModalProps) {
     hex: safeHex(g.colorHex, g.name),
     image: g.image,
   }));
+
+  const scoreVal = pairAnalysis ? pairAnalysis.score : 95;
+  const displayGarments = garments.slice(0, 2);
+  const dateStr = outfit
+    ? new Date(outfit.createdAt)
+        .toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        })
+        .toUpperCase()
+    : "";
+
+  const paletteColors =
+    pairAnalysis?.palette && pairAnalysis.palette.length > 0
+      ? pairAnalysis.palette
+      : colorSwatches.map((c) => c.hex);
+  const uniqueColors = Array.from(new Set(paletteColors)).slice(0, 4);
 
   // Helper to load HTML Image
   const loadImage = (src: string): Promise<HTMLImageElement> => {
@@ -178,14 +257,15 @@ export function LookbookModal({ isOpen, onClose, outfit }: LookbookModalProps) {
 
     // Decorative outer stroke
     ctx.strokeStyle = colors.border;
-    ctx.lineWidth = 2;
-    roundRect(ctx, 24, 24, W - 48, H - 48, 36);
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, 24, 24, W - 48, H - 48, 28);
     ctx.stroke();
 
-    // 2. Header Bar
-    ctx.fillStyle = colors.textSecondary;
-    ctx.font = "bold 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
-    ctx.fillText("FITCHECK STUDIO  •  EDITORIAL ARCHIVE", 60, 72);
+    // 2. Header Bar: Minimal Luxury Typography
+    ctx.textBaseline = "top";
+    ctx.fillStyle = colors.textPrimary;
+    ctx.font = "bold 20px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    ctx.fillText("WARDROBE STUDIO", 60, 56);
 
     const dateStr = new Date(outfit.createdAt).toLocaleDateString(undefined, {
       month: "short",
@@ -193,350 +273,530 @@ export function LookbookModal({ isOpen, onClose, outfit }: LookbookModalProps) {
       year: "numeric",
     }).toUpperCase();
     ctx.textAlign = "right";
-    ctx.fillText(dateStr, W - 60, 72);
+    ctx.fillStyle = colors.textSecondary;
+    ctx.font = "16px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    ctx.fillText(dateStr, W - 60, 58);
     ctx.textAlign = "left";
 
     // Header dividing line
     ctx.strokeStyle = colors.border;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(60, 94);
-    ctx.lineTo(W - 60, 94);
+    ctx.moveTo(60, 92);
+    ctx.lineTo(W - 60, 92);
     ctx.stroke();
+
+    // Helper: Safely draw line-wrapped text top-down without ascender/descender overlap
+    const drawTextLines = (
+      text: string,
+      x: number,
+      startY: number,
+      maxW: number,
+      lineH: number,
+      maxLines = 2
+    ): number => {
+      ctx.textBaseline = "top";
+      const words = text.split(" ");
+      let line = "";
+      let curY = startY;
+      let count = 0;
+
+      for (let n = 0; n < words.length; n++) {
+        const testLine = line + words[n] + " ";
+        const metrics = ctx.measureText(testLine);
+        if (metrics.width > maxW && n > 0) {
+          if (count === maxLines - 1) {
+            ctx.fillText(line.trim() + "...", x, curY);
+            return curY + lineH;
+          }
+          ctx.fillText(line.trim(), x, curY);
+          line = words[n] + " ";
+          curY += lineH;
+          count++;
+        } else {
+          line = testLine;
+        }
+      }
+      ctx.fillText(line.trim(), x, curY);
+      return curY + lineH;
+    };
+
+    // Helper: Draw image contained within a box preserving exact aspect ratio (no vertical squashing!)
+    const drawContainedImage = (
+      img: HTMLImageElement,
+      boxX: number,
+      boxY: number,
+      boxW: number,
+      boxH: number,
+      radius = 20
+    ) => {
+      const naturalW = img.naturalWidth || img.width || 1;
+      const naturalH = img.naturalHeight || img.height || 1;
+      const imgAspect = naturalW / naturalH;
+      const boxAspect = boxW / boxH;
+
+      let drawW = boxW;
+      let drawH = boxH;
+      let drawX = boxX;
+      let drawY = boxY;
+
+      if (imgAspect < boxAspect) {
+        drawH = boxH;
+        drawW = boxH * imgAspect;
+        drawX = boxX + (boxW - drawW) / 2;
+        drawY = boxY;
+      } else {
+        drawW = boxW;
+        drawH = boxW / imgAspect;
+        drawX = boxX;
+        drawY = boxY + (boxH - drawH) / 2;
+      }
+
+      ctx.save();
+      roundRect(ctx, boxX, boxY, boxW, boxH, radius);
+      ctx.clip();
+      ctx.fillStyle = colors.cardBg;
+      ctx.fill();
+      ctx.drawImage(img, drawX, drawY, drawW, drawH);
+      ctx.restore();
+
+      ctx.strokeStyle = colors.border;
+      ctx.lineWidth = 1.5;
+      roundRect(ctx, boxX, boxY, boxW, boxH, radius);
+      ctx.stroke();
+    };
+
+    const displayGarments = garments.slice(0, 2);
 
     // 3. Load and Draw Main Try-On Image
     try {
       const modelImg = await loadImage(outfit.resultImage);
 
       if (ratio === "4:5") {
-        // 4:5 Layout: Side-by-side or stacked
+        // ==========================================
+        // 4:5 PORTRAIT LAYOUT (1080 x 1350)
+        // ==========================================
         const imgX = 60;
         const imgY = 120;
-        const imgW = 540;
-        const imgH = 760;
+        const imgW = 520;
+        const imgH = 790;
 
-        // Clip image with rounded corners
-        ctx.save();
-        roundRect(ctx, imgX, imgY, imgW, imgH, 28);
-        ctx.clip();
-        ctx.drawImage(modelImg, imgX, imgY, imgW, imgH);
-        ctx.restore();
+        drawContainedImage(modelImg, imgX, imgY, imgW, imgH, 20);
 
-        // Border around image
-        ctx.strokeStyle = colors.border;
-        ctx.lineWidth = 2;
-        roundRect(ctx, imgX, imgY, imgW, imgH, 28);
-        ctx.stroke();
+        // Right Column: Details & Garments
+        const colX = 615;
+        const colW = 405;
+        let curY = 125;
 
-        // High-res studio badge on image
-        ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
-        roundRect(ctx, imgX + 20, imgY + imgH - 52, 160, 32, 16);
-        ctx.fill();
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 11px -apple-system, BlinkMacSystemFont, sans-serif";
-        ctx.fillText("✦ VIRTUAL TRY-ON", imgX + 36, imgY + imgH - 32);
+        // Editorial Tag
+        ctx.fillStyle = colors.accent;
+        ctx.font = "bold 15px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.fillText("CURATED OOTD", colX, curY);
+        curY += 28;
 
-        // Right Column: Title & Metadata
-        const colX = 630;
-        let curY = 140;
-
-        // Vibe Pill
-        if (pairAnalysis) {
-          ctx.fillStyle = colors.accentBg;
-          roundRect(ctx, colX, curY, 150, 28, 14);
-          ctx.fill();
-          ctx.fillStyle = colors.accent;
-          ctx.font = "bold 11px -apple-system, sans-serif";
-          ctx.fillText(`★ ${pairAnalysis.relation.toUpperCase()}`, colX + 14, curY + 18);
-          curY += 46;
-        }
-
-        // Title
+        // Headline / Title
         ctx.fillStyle = colors.textPrimary;
-        ctx.font = "bold 32px 'Playfair Display', Georgia, serif";
-        const titleText = customTitle || outfit.name;
-        // Basic multi-line text wrapping
-        const words = titleText.split(" ");
-        let line = "";
-        for (let n = 0; n < words.length; n++) {
-          const testLine = line + words[n] + " ";
-          const metrics = ctx.measureText(testLine);
-          if (metrics.width > 380 && n > 0) {
-            ctx.fillText(line, colX, curY);
-            line = words[n] + " ";
-            curY += 38;
-          } else {
-            line = testLine;
-          }
-        }
-        ctx.fillText(line, colX, curY);
-        curY += 40;
+        ctx.font = "bold 40px 'Playfair Display', Georgia, serif";
+        curY = drawTextLines(customTitle || outfit.name, colX, curY, colW, 48, 2) + 8;
 
-        // Persona & Ensemble info
+        // Model Subtitle
         ctx.fillStyle = colors.textSecondary;
-        ctx.font = "14px -apple-system, sans-serif";
-        ctx.fillText(
-          `${outfit.person?.name || "Elena Studio"}  •  ${garments.length} Styled Pieces`,
-          colX,
-          curY
-        );
-        curY += 36;
+        ctx.font = "19px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.fillText(`Styled on ${outfit.person?.name || "Studio Model"}`, colX, curY);
+        curY += 34;
 
-        // Garment Decomposition Swatches
-        if (showGarments && garments.length > 0) {
+        // Hairline Divider
+        ctx.strokeStyle = colors.border;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(colX, curY);
+        ctx.lineTo(colX + colW, curY);
+        ctx.stroke();
+        curY += 24;
+
+        // Max 2 Clothes Items
+        if (showGarments && displayGarments.length > 0) {
           ctx.fillStyle = colors.textSecondary;
-          ctx.font = "bold 11px -apple-system, sans-serif";
-          ctx.fillText("WARDROBE PIECES", colX, curY);
-          curY += 16;
+          ctx.font = "bold 14px -apple-system, BlinkMacSystemFont, sans-serif";
+          ctx.fillText("PIECES", colX, curY);
+          curY += 22;
 
-          for (const g of garments.slice(0, 3)) {
-            // Row card
+          for (const g of displayGarments) {
             ctx.fillStyle = colors.cardBg;
-            roundRect(ctx, colX, curY, 390, 72, 16);
+            roundRect(ctx, colX, curY, colW, 88, 16);
             ctx.fill();
             ctx.strokeStyle = colors.border;
-            ctx.lineWidth = 1;
+            ctx.lineWidth = 1.5;
             ctx.stroke();
 
-            // Swatch thumb
+            // Thumbnail
             try {
               const gImg = await loadImage(g.image);
               ctx.save();
-              roundRect(ctx, colX + 10, curY + 10, 52, 52, 10);
+              roundRect(ctx, colX + 10, curY + 10, 68, 68, 10);
               ctx.clip();
-              ctx.drawImage(gImg, colX + 10, curY + 10, 52, 52);
+              ctx.fillStyle = colors.badgeBg;
+              ctx.fill();
+              ctx.drawImage(gImg, colX + 10, curY + 10, 68, 68);
               ctx.restore();
+              ctx.strokeStyle = colors.border;
+              ctx.lineWidth = 1;
+              roundRect(ctx, colX + 10, curY + 10, 68, 68, 10);
+              ctx.stroke();
             } catch {}
 
-            // Garment title & category
+            // Garment name
             ctx.fillStyle = colors.textPrimary;
-            ctx.font = "bold 14px -apple-system, sans-serif";
-            const truncName = g.name.length > 22 ? g.name.slice(0, 20) + "..." : g.name;
-            ctx.fillText(truncName, colX + 74, curY + 32);
+            ctx.font = "bold 18px -apple-system, BlinkMacSystemFont, sans-serif";
+            const truncName = g.name.length > 18 ? g.name.slice(0, 16) + "..." : g.name;
+            ctx.fillText(truncName, colX + 90, curY + 22);
 
+            // Category tag
             ctx.fillStyle = colors.textSecondary;
-            ctx.font = "11px -apple-system, sans-serif";
-            ctx.fillText(g.category.toUpperCase(), colX + 74, curY + 52);
+            ctx.font = "bold 13px -apple-system, BlinkMacSystemFont, sans-serif";
+            ctx.fillText(g.category.toUpperCase(), colX + 90, curY + 48);
 
-            // Dominant color circle
+            // Dominant color swatch
             const gHex = safeHex(g.colorHex, g.name);
             ctx.fillStyle = gHex;
             ctx.beginPath();
-            ctx.arc(colX + 355, curY + 36, 12, 0, Math.PI * 2);
+            ctx.arc(colX + colW - 30, curY + 44, 14, 0, Math.PI * 2);
             ctx.fill();
-            ctx.strokeStyle = "rgba(0,0,0,0.2)";
-            ctx.lineWidth = 1;
+            ctx.strokeStyle = colors.border;
+            ctx.lineWidth = 1.5;
             ctx.stroke();
 
-            curY += 82;
+            curY += 100;
           }
         }
 
-        // Bottom Banner Area (Stylist Note & Harmony Badge)
-        const botY = 920;
+        // Bottom Row (Y = 940 to 1220) - Perfectly Balanced Symmetry
+        // Left Card: Color Palette Profile (520 x 280)
+        const palCardX = 60;
+        const palCardY = 940;
+        const palCardW = 520;
+        const palCardH = 280;
+
         ctx.fillStyle = colors.cardBg;
-        roundRect(ctx, 60, botY, W - 120, 270, 24);
+        roundRect(ctx, palCardX, palCardY, palCardW, palCardH, 18);
         ctx.fill();
         ctx.strokeStyle = colors.border;
-        ctx.lineWidth = 1;
+        ctx.lineWidth = 1.5;
         ctx.stroke();
 
-        // Harmony score & palette
-        if (showHarmony && pairAnalysis) {
-          // Score block
-          ctx.fillStyle = colors.accentBg;
-          roundRect(ctx, 90, botY + 30, 110, 64, 16);
-          ctx.fill();
-          ctx.fillStyle = colors.accent;
-          ctx.font = "bold 26px -apple-system, sans-serif";
-          ctx.fillText(`${pairAnalysis.score}%`, 112, botY + 72);
+        ctx.fillStyle = colors.textSecondary;
+        ctx.font = "bold 14px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.fillText("COLOR PALETTE PROFILE", palCardX + 24, palCardY + 24);
 
-          ctx.fillStyle = colors.textPrimary;
-          ctx.font = "bold 16px -apple-system, sans-serif";
-          ctx.fillText("Color & Style Harmony", 220, botY + 54);
+        if (showHarmony) {
+          const paletteColors =
+            pairAnalysis?.palette && pairAnalysis.palette.length > 0
+              ? pairAnalysis.palette
+              : colorSwatches.map((c) => c.hex);
+          const uniqueColors = Array.from(new Set(paletteColors)).slice(0, 4);
+          const colStep = (palCardW - 48) / Math.max(1, uniqueColors.length);
 
-          ctx.fillStyle = colors.textSecondary;
-          ctx.font = "13px -apple-system, sans-serif";
-          ctx.fillText(`Aesthetic Mode: ${pairAnalysis.relation}`, 220, botY + 78);
+          uniqueColors.forEach((hex, idx) => {
+            const cx = palCardX + 24 + idx * colStep + 28;
+            const cy = palCardY + 110;
 
-          // Palette circles
-          let palX = W - 230;
-          pairAnalysis.palette.forEach((hex) => {
             ctx.fillStyle = hex;
             ctx.beginPath();
-            ctx.arc(palX, botY + 62, 18, 0, Math.PI * 2);
+            ctx.arc(cx, cy, 24, 0, Math.PI * 2);
             ctx.fill();
             ctx.strokeStyle = colors.border;
             ctx.lineWidth = 2;
             ctx.stroke();
-            palX += 45;
+
+            const cName = nearestColorName(hex);
+            ctx.fillStyle = colors.textPrimary;
+            ctx.font = "bold 13px -apple-system, BlinkMacSystemFont, sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText(cName, cx, cy + 34);
+
+            ctx.fillStyle = colors.textSecondary;
+            ctx.font = "12px monospace";
+            ctx.fillText(hex.toUpperCase(), cx, cy + 54);
+            ctx.textAlign = "left";
           });
-
-          // Stylist Quote
-          ctx.strokeStyle = colors.border;
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.moveTo(90, botY + 115);
-          ctx.lineTo(W - 90, botY + 115);
-          ctx.stroke();
-
-          ctx.fillStyle = colors.textPrimary;
-          ctx.font = "italic 15px 'Playfair Display', Georgia, serif";
-          ctx.fillText(`“${pairAnalysis.stylistNote}”`, 90, botY + 160);
-
-          ctx.fillStyle = colors.textSecondary;
-          ctx.font = "12px -apple-system, sans-serif";
-          ctx.fillText(
-            `Curated with FitCheck Studio ~ Local AI Diffusion • Euler Sampling`,
-            90,
-            botY + 225
-          );
-        } else {
-          // Single piece look note
-          ctx.fillStyle = colors.textPrimary;
-          ctx.font = "italic 16px 'Playfair Display', Georgia, serif";
-          ctx.fillText(`“Styled with precision using your calibrated personal studio model.”`, 90, botY + 80);
-
-          ctx.fillStyle = colors.textSecondary;
-          ctx.font = "13px -apple-system, sans-serif";
-          ctx.fillText(`FitCheck Studio • High Resolution 768x1024 Native Composite`, 90, botY + 140);
         }
 
-        // Studio Watermark
+        // Right Card: Clean Style Harmony (405 x 280)
+        const harmCardX = 615;
+        const harmCardY = 940;
+        const harmCardW = 405;
+        const harmCardH = 280;
+
+        ctx.fillStyle = colors.cardBg;
+        roundRect(ctx, harmCardX, harmCardY, harmCardW, harmCardH, 18);
+        ctx.fill();
+        ctx.strokeStyle = colors.border;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
         ctx.fillStyle = colors.textSecondary;
-        ctx.font = "bold 11px -apple-system, sans-serif";
+        ctx.font = "bold 14px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.fillText("STYLE HARMONY", harmCardX + 24, harmCardY + 24);
+
+        const scoreVal = pairAnalysis ? pairAnalysis.score : 95;
+        ctx.fillStyle = colors.accent;
+        ctx.font = "bold 54px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.fillText(`${scoreVal}%`, harmCardX + 24, harmCardY + 68);
+
+        ctx.fillStyle = colors.textPrimary;
+        ctx.font = "bold 16px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.fillText(pairAnalysis?.relation || "Complementary Match", harmCardX + 24, harmCardY + 150);
+
+        ctx.fillStyle = colors.textSecondary;
+        ctx.font = "14px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.fillText("Verified Wardrobe Palette", harmCardX + 24, harmCardY + 180);
+
+        // Footer
+        ctx.fillStyle = colors.textSecondary;
+        ctx.font = "14px -apple-system, BlinkMacSystemFont, sans-serif";
         ctx.textAlign = "center";
-        ctx.fillText("FITCHECK  •  AUTONOMOUS DIGITAL WARDROBE", W / 2, H - 45);
+        ctx.fillText("WARDROBE STUDIO  •  OOTD ARCHIVE", W / 2, 1295);
         ctx.textAlign = "left";
       } else if (ratio === "9:16") {
-        // Story 9:16 (1080 x 1920) Layout
-        const imgX = 80;
-        const imgY = 140;
-        const imgW = W - 160;
-        const imgH = 1100;
-
-        ctx.save();
-        roundRect(ctx, imgX, imgY, imgW, imgH, 36);
-        ctx.clip();
-        ctx.drawImage(modelImg, imgX, imgY, imgW, imgH);
-        ctx.restore();
-
-        ctx.strokeStyle = colors.border;
-        ctx.lineWidth = 2;
-        roundRect(ctx, imgX, imgY, imgW, imgH, 36);
-        ctx.stroke();
-
-        // Title and Content below
-        let curY = imgY + imgH + 60;
-        ctx.fillStyle = colors.accent;
-        ctx.font = "bold 13px -apple-system, sans-serif";
-        ctx.fillText(
-          pairAnalysis ? `★ ${pairAnalysis.relation.toUpperCase()}` : "★ TAILORED LOOK",
-          80,
-          curY
-        );
-        curY += 40;
-
-        ctx.fillStyle = colors.textPrimary;
-        ctx.font = "bold 38px 'Playfair Display', Georgia, serif";
-        ctx.fillText(customTitle || outfit.name, 80, curY);
-        curY += 45;
-
-        ctx.fillStyle = colors.textSecondary;
-        ctx.font = "16px -apple-system, sans-serif";
-        ctx.fillText(
-          `${outfit.person?.name || "Studio Persona"}  •  ${garments.length} Pieces  •  ${pairAnalysis ? pairAnalysis.score + "% Harmony" : "Curated Look"}`,
-          80,
-          curY
-        );
-
-        // Footer Brand
-        ctx.fillStyle = colors.textSecondary;
-        ctx.font = "bold 12px -apple-system, sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText("FITCHECK  •  EDITORIAL LOOKBOOK ARCHIVE", W / 2, H - 60);
-        ctx.textAlign = "left";
-      } else {
-        // 1:1 Square (1080 x 1080) Layout
-        const imgX = 60;
+        // ==========================================
+        // 9:16 STORY LAYOUT (1080 x 1920) - Ultra Minimalist
+        // ==========================================
+        const imgX = 70;
         const imgY = 120;
-        const imgW = 540;
-        const imgH = 720;
+        const imgW = 940;
+        const imgH = 1380;
 
-        ctx.save();
-        roundRect(ctx, imgX, imgY, imgW, imgH, 24);
-        ctx.clip();
-        ctx.drawImage(modelImg, imgX, imgY, imgW, imgH);
-        ctx.restore();
+        drawContainedImage(modelImg, imgX, imgY, imgW, imgH, 24);
 
-        ctx.strokeStyle = colors.border;
-        ctx.lineWidth = 2;
-        roundRect(ctx, imgX, imgY, imgW, imgH, 24);
-        ctx.stroke();
+        // Content Below Photo
+        let curY = 1530;
 
-        // Right details
-        const colX = 640;
-        let curY = 160;
+        // Headline / Title
+        ctx.fillStyle = colors.textPrimary;
+        ctx.font = "bold 44px 'Playfair Display', Georgia, serif";
+        curY = drawTextLines(customTitle || outfit.name, 70, curY, 940, 50, 1) + 6;
 
-        ctx.fillStyle = colors.accent;
-        ctx.font = "bold 12px -apple-system, sans-serif";
+        // Subtitle + Palette Row
+        const scoreVal = pairAnalysis ? pairAnalysis.score : 95;
+        ctx.fillStyle = colors.textSecondary;
+        ctx.font = "19px -apple-system, BlinkMacSystemFont, sans-serif";
         ctx.fillText(
-          pairAnalysis ? `★ ${pairAnalysis.relation.toUpperCase()}` : "EDITORIAL FIT",
-          colX,
+          `Styled on ${outfit.person?.name || "Studio Model"}  •  ${scoreVal}% Harmony`,
+          70,
           curY
         );
-        curY += 36;
 
-        ctx.fillStyle = colors.textPrimary;
-        ctx.font = "bold 30px 'Playfair Display', Georgia, serif";
-        ctx.fillText(customTitle || outfit.name, colX, curY);
-        curY += 45;
+        // 4 Clean Circular Color Swatches Aligned to the Right
+        if (showHarmony) {
+          const paletteColors =
+            pairAnalysis?.palette && pairAnalysis.palette.length > 0
+              ? pairAnalysis.palette
+              : colorSwatches.map((c) => c.hex);
+          const uniqueColors = Array.from(new Set(paletteColors)).slice(0, 4);
 
-        ctx.fillStyle = colors.textSecondary;
-        ctx.font = "14px -apple-system, sans-serif";
-        ctx.fillText(`Model: ${outfit.person?.name || "Studio Persona"}`, colX, curY);
-        curY += 45;
-
-        // Swatches
-        if (garments.length > 0) {
-          ctx.fillStyle = colors.textSecondary;
-          ctx.font = "bold 11px -apple-system, sans-serif";
-          ctx.fillText("GARMENTS STYLED", colX, curY);
-          curY += 20;
-
-          for (const g of garments.slice(0, 2)) {
-            ctx.fillStyle = colors.cardBg;
-            roundRect(ctx, colX, curY, 380, 64, 14);
+          let palX = 1010 - uniqueColors.length * 36;
+          uniqueColors.forEach((hex) => {
+            ctx.fillStyle = hex;
+            ctx.beginPath();
+            ctx.arc(palX + 12, curY + 10, 12, 0, Math.PI * 2);
             ctx.fill();
             ctx.strokeStyle = colors.border;
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            palX += 36;
+          });
+        }
+        curY += 38;
+
+        // Hairline Divider
+        ctx.strokeStyle = colors.border;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(70, curY);
+        ctx.lineTo(1010, curY);
+        ctx.stroke();
+        curY += 28;
+
+        // Garments (Max 2 pieces side-by-side)
+        if (showGarments && displayGarments.length > 0) {
+          const cardW = displayGarments.length === 1 ? 940 : 455;
+          const cardH = 88;
+
+          for (let i = 0; i < displayGarments.length; i++) {
+            const g = displayGarments[i];
+            const gx = 70 + i * (cardW + 30);
+
+            ctx.fillStyle = colors.cardBg;
+            roundRect(ctx, gx, curY, cardW, cardH, 16);
+            ctx.fill();
+            ctx.strokeStyle = colors.border;
+            ctx.lineWidth = 1.5;
             ctx.stroke();
 
             try {
               const gImg = await loadImage(g.image);
               ctx.save();
-              roundRect(ctx, colX + 8, curY + 8, 48, 48, 8);
+              roundRect(ctx, gx + 10, curY + 10, 68, 68, 10);
               ctx.clip();
-              ctx.drawImage(gImg, colX + 8, curY + 8, 48, 48);
+              ctx.fillStyle = colors.badgeBg;
+              ctx.fill();
+              ctx.drawImage(gImg, gx + 10, curY + 10, 68, 68);
               ctx.restore();
+              ctx.strokeStyle = colors.border;
+              ctx.lineWidth = 1;
+              roundRect(ctx, gx + 10, curY + 10, 68, 68, 10);
+              ctx.stroke();
             } catch {}
 
             ctx.fillStyle = colors.textPrimary;
-            ctx.font = "bold 13px -apple-system, sans-serif";
-            ctx.fillText(g.name, colX + 66, curY + 28);
+            ctx.font = "bold 18px -apple-system, BlinkMacSystemFont, sans-serif";
+            const truncName = g.name.length > 18 ? g.name.slice(0, 16) + "..." : g.name;
+            ctx.fillText(truncName, gx + 90, curY + 22);
 
             ctx.fillStyle = colors.textSecondary;
-            ctx.font = "11px -apple-system, sans-serif";
-            ctx.fillText(g.category.toUpperCase(), colX + 66, curY + 46);
+            ctx.font = "bold 13px -apple-system, BlinkMacSystemFont, sans-serif";
+            ctx.fillText(g.category.toUpperCase(), gx + 90, curY + 48);
 
-            curY += 76;
+            const gHex = safeHex(g.colorHex, g.name);
+            ctx.fillStyle = gHex;
+            ctx.beginPath();
+            ctx.arc(gx + cardW - 30, curY + 44, 14, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = colors.border;
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
           }
         }
 
-        // Bottom Brand
+        // Footer
         ctx.fillStyle = colors.textSecondary;
-        ctx.font = "bold 11px -apple-system, sans-serif";
+        ctx.font = "14px -apple-system, BlinkMacSystemFont, sans-serif";
         ctx.textAlign = "center";
-        ctx.fillText("FITCHECK  •  AUTONOMOUS DIGITAL WARDROBE", W / 2, H - 40);
+        ctx.fillText("WARDROBE STUDIO  •  STORY ARCHIVE", W / 2, 1870);
+        ctx.textAlign = "left";
+      } else {
+        // ==========================================
+        // 1:1 SQUARE LAYOUT (1080 x 1080)
+        // ==========================================
+        const imgX = 60;
+        const imgY = 120;
+        const imgW = 510;
+        const imgH = 840;
+
+        drawContainedImage(modelImg, imgX, imgY, imgW, imgH, 20);
+
+        // Right Column: Details & Garments
+        const colX = 610;
+        const colW = 410;
+        let curY = 135;
+
+        // Editorial Tag
+        ctx.fillStyle = colors.accent;
+        ctx.font = "bold 15px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.fillText("CURATED OOTD", colX, curY);
+        curY += 28;
+
+        // Headline / Title
+        ctx.fillStyle = colors.textPrimary;
+        ctx.font = "bold 38px 'Playfair Display', Georgia, serif";
+        curY = drawTextLines(customTitle || outfit.name, colX, curY, colW, 46, 2) + 8;
+
+        // Model Subtitle
+        ctx.fillStyle = colors.textSecondary;
+        ctx.font = "19px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.fillText(`Styled on ${outfit.person?.name || "Studio Model"}`, colX, curY);
+        curY += 34;
+
+        // Hairline Divider
+        ctx.strokeStyle = colors.border;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(colX, curY);
+        ctx.lineTo(colX + colW, curY);
+        ctx.stroke();
+        curY += 26;
+
+        // Garments (Max 2 pieces)
+        if (showGarments && displayGarments.length > 0) {
+          ctx.fillStyle = colors.textSecondary;
+          ctx.font = "bold 14px -apple-system, BlinkMacSystemFont, sans-serif";
+          ctx.fillText("PIECES", colX, curY);
+          curY += 22;
+
+          for (const g of displayGarments) {
+            ctx.fillStyle = colors.cardBg;
+            roundRect(ctx, colX, curY, colW, 84, 16);
+            ctx.fill();
+            ctx.strokeStyle = colors.border;
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            try {
+              const gImg = await loadImage(g.image);
+              ctx.save();
+              roundRect(ctx, colX + 10, curY + 10, 64, 64, 10);
+              ctx.clip();
+              ctx.fillStyle = colors.badgeBg;
+              ctx.fill();
+              ctx.drawImage(gImg, colX + 10, curY + 10, 64, 64);
+              ctx.restore();
+              ctx.strokeStyle = colors.border;
+              ctx.lineWidth = 1;
+              roundRect(ctx, colX + 10, curY + 10, 64, 64, 10);
+              ctx.stroke();
+            } catch {}
+
+            ctx.fillStyle = colors.textPrimary;
+            ctx.font = "bold 18px -apple-system, BlinkMacSystemFont, sans-serif";
+            const truncName = g.name.length > 18 ? g.name.slice(0, 16) + "..." : g.name;
+            ctx.fillText(truncName, colX + 88, curY + 20);
+
+            ctx.fillStyle = colors.textSecondary;
+            ctx.font = "bold 13px -apple-system, BlinkMacSystemFont, sans-serif";
+            ctx.fillText(g.category.toUpperCase(), colX + 88, curY + 46);
+
+            const gHex = safeHex(g.colorHex, g.name);
+            ctx.fillStyle = gHex;
+            ctx.beginPath();
+            ctx.arc(colX + colW - 30, curY + 42, 14, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = colors.border;
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            curY += 96;
+          }
+          curY += 8;
+        }
+
+        // Minimalist Harmony Card
+        if (showHarmony) {
+          const scoreVal = pairAnalysis ? pairAnalysis.score : 95;
+          ctx.fillStyle = colors.cardBg;
+          roundRect(ctx, colX, curY, colW, 90, 16);
+          ctx.fill();
+          ctx.strokeStyle = colors.border;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          ctx.fillStyle = colors.accent;
+          ctx.font = "bold 38px -apple-system, BlinkMacSystemFont, sans-serif";
+          ctx.fillText(`${scoreVal}%`, colX + 20, curY + 24);
+
+          ctx.fillStyle = colors.textPrimary;
+          ctx.font = "bold 16px -apple-system, BlinkMacSystemFont, sans-serif";
+          ctx.fillText("Style Harmony Match", colX + 115, curY + 22);
+
+          ctx.fillStyle = colors.textSecondary;
+          ctx.font = "14px -apple-system, BlinkMacSystemFont, sans-serif";
+          ctx.fillText(pairAnalysis?.relation || "Complementary Match", colX + 115, curY + 48);
+        }
+
+        // Footer
+        ctx.fillStyle = colors.textSecondary;
+        ctx.font = "14px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("WARDROBE STUDIO  •  MINIMAL ARCHIVE", W / 2, 1030);
         ctx.textAlign = "left";
       }
     } catch (err) {
@@ -551,17 +811,38 @@ export function LookbookModal({ isOpen, onClose, outfit }: LookbookModalProps) {
     }
   }, [isOpen, renderCanvas]);
 
-  // Handle Download
-  const handleDownload = () => {
-    if (!canvasRef.current || !outfit) return;
+  // Handle Download (High-Resolution DOM vector export with canvas fallback)
+  const handleDownload = async () => {
+    if (!outfit) return;
     setIsExporting(true);
+    const safeTitle = (customTitle || outfit.name).toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    const filename = `lookbook-${safeTitle}-${ratio.replace(":", "-")}.png`;
+
     try {
-      const dataUrl = canvasRef.current.toDataURL("image/png");
-      const a = document.createElement("a");
-      a.href = dataUrl;
-      const safeTitle = (customTitle || outfit.name).toLowerCase().replace(/[^a-z0-9]+/g, "-");
-      a.download = `lookbook-${safeTitle}-${ratio.replace(":", "-")}.png`;
-      a.click();
+      if (cardRef.current) {
+        try {
+          const dataUrl = await toPng(cardRef.current, {
+            pixelRatio: 3, // 3x Ultra-High Resolution (Razor sharp, zero pixelation)
+            cacheBust: true,
+          });
+          const a = document.createElement("a");
+          a.href = dataUrl;
+          a.download = filename;
+          a.click();
+          return;
+        } catch (domErr) {
+          console.warn("DOM to PNG export fallback to canvas:", domErr);
+        }
+      }
+
+      // Canvas fallback
+      if (canvasRef.current) {
+        const dataUrl = canvasRef.current.toDataURL("image/png");
+        const a = document.createElement("a");
+        a.href = dataUrl;
+        a.download = filename;
+        a.click();
+      }
     } finally {
       setIsExporting(false);
     }
@@ -569,48 +850,68 @@ export function LookbookModal({ isOpen, onClose, outfit }: LookbookModalProps) {
 
   // Handle Copy to Clipboard
   const handleCopy = async () => {
-    if (!canvasRef.current) return;
     try {
-      canvasRef.current.toBlob(async (blob) => {
-        if (!blob) return;
+      if (cardRef.current) {
         try {
-          await navigator.clipboard.write([
-            new ClipboardItem({ "image/png": blob }),
-          ]);
-          setCopySuccess(true);
-          setTimeout(() => setCopySuccess(false), 3000);
-        } catch {
-          // If direct clipboard write is restricted, notify user to use download
-          alert("Image copied via download link or use Download button.");
+          const blob = await toBlob(cardRef.current, {
+            pixelRatio: 3,
+            cacheBust: true,
+          });
+          if (blob) {
+            await navigator.clipboard.write([
+              new ClipboardItem({ "image/png": blob }),
+            ]);
+            setCopySuccess(true);
+            setTimeout(() => setCopySuccess(false), 3000);
+            return;
+          }
+        } catch (domErr) {
+          console.warn("DOM to Blob fallback to canvas:", domErr);
         }
-      });
+      }
+
+      if (canvasRef.current) {
+        canvasRef.current.toBlob(async (blob) => {
+          if (!blob) return;
+          try {
+            await navigator.clipboard.write([
+              new ClipboardItem({ "image/png": blob }),
+            ]);
+            setCopySuccess(true);
+            setTimeout(() => setCopySuccess(false), 3000);
+          } catch {
+            alert("Image copied via download link or use Download button.");
+          }
+        });
+      }
     } catch (err) {
       console.warn("Clipboard copy unavailable:", err);
+      alert("Image copied via download link or use Download button.");
     }
   };
 
-  if (!isOpen || !outfit) return null;
+  if (!isOpen || !outfit || !mounted) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/70 p-4 backdrop-blur-sm overflow-y-auto">
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md p-3 sm:p-6 overflow-hidden">
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
-        className="relative w-full max-w-5xl rounded-3xl border border-line bg-paper p-6 sm:p-8 shadow-2xl my-6 flex flex-col max-h-[92vh]"
+        className="relative w-full max-w-6xl rounded-3xl border border-line bg-paper p-5 sm:p-7 shadow-2xl flex flex-col max-h-[94vh] overflow-hidden"
       >
         {/* Top Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-line mb-4">
+        <div className="flex items-center justify-between pb-3.5 border-b border-line mb-4 shrink-0">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-flame/10 text-flame">
               <Sparkles className="h-5 w-5" />
             </div>
             <div>
-              <h2 className="font-display text-2xl font-bold text-ink">
-                Social Fit Card & Lookbook Studio
+              <h2 className="font-display text-xl sm:text-2xl font-bold text-ink">
+                Social Fit Card Studio
               </h2>
               <p className="text-xs text-ink-soft">
-                Export an editorial composite card with garment swatches, color harmony score, and aesthetic vibe tags.
+                Export high-resolution OOTD lookbook cards with your styled model, pieces, and aesthetic vibe.
               </p>
             </div>
           </div>
@@ -703,7 +1004,7 @@ export function LookbookModal({ isOpen, onClose, outfit }: LookbookModalProps) {
               <label className="flex items-center justify-between text-xs font-medium text-ink cursor-pointer">
                 <span className="flex items-center gap-2">
                   <Shirt className="h-4 w-4 text-flame" />
-                  <span>Show Garment Swatches</span>
+                  <span>Show Garment Pieces (Max 2)</span>
                 </span>
                 <input
                   type="checkbox"
@@ -739,23 +1040,355 @@ export function LookbookModal({ isOpen, onClose, outfit }: LookbookModalProps) {
                     {pairAnalysis.relation}
                   </span>
                 </div>
-                <p className="text-[11px] text-ink-soft leading-relaxed italic">
-                  "{pairAnalysis.stylistNote}"
-                </p>
               </div>
             )}
           </div>
 
-          {/* RIGHT COLUMN: Live Canvas & Export Preview */}
-          <div className="lg:col-span-7 flex flex-col items-center justify-center p-4 rounded-3xl border border-line bg-bone/50 min-h-[460px]">
-            <div className="relative max-h-[500px] w-full flex items-center justify-center overflow-hidden">
-              <canvas
-                ref={canvasRef}
-                className="max-h-[480px] max-w-full rounded-2xl shadow-xl border border-line object-contain transition-all"
-              />
+          {/* RIGHT COLUMN: Live Vector DOM Card Preview (Crystal clear vector typography & layout) */}
+          <div className="lg:col-span-7 flex flex-col items-center justify-center p-3 sm:p-5 rounded-3xl border border-line bg-bone/40 min-h-[520px] lg:min-h-[640px]">
+            <div className="relative w-full flex items-center justify-center overflow-hidden py-1">
+              {/* LIVE VECTOR DOM CARD */}
+              <div
+                ref={cardRef}
+                className={clsx(
+                  "relative select-none shadow-2xl transition-all duration-300 overflow-hidden",
+                  // Aspect ratio containers
+                  ratio === "9:16" && "w-full max-w-[330px] aspect-[9/16] rounded-3xl",
+                  ratio === "4:5" && "w-full max-w-[420px] aspect-[4/5] rounded-3xl",
+                  ratio === "1:1" && "w-full max-w-[440px] aspect-square rounded-3xl",
+                  // Themes
+                  theme === "noir" && "bg-[#0c0b09] text-[#f5f2eb] border border-[#2b2722]",
+                  theme === "alabaster" && "bg-[#faf8f5] text-[#17140e] border border-[#e5ded4]",
+                  theme === "terracotta" && "bg-[#17110e] text-[#fcefe9] border border-[#422e25]"
+                )}
+              >
+                {/* 9:16 Ultra-Minimalist Story */}
+                {ratio === "9:16" && (
+                  <div className="flex flex-col h-full p-4 sm:p-4.5 justify-between">
+                    {/* Header */}
+                    <div className="flex items-center justify-between pb-2 border-b border-current/10 shrink-0">
+                      <span className="text-[10px] font-bold tracking-[0.22em] uppercase opacity-90">
+                        Wardrobe Studio
+                      </span>
+                      <span className="text-[10px] tracking-wider uppercase opacity-50 font-mono">
+                        {dateStr}
+                      </span>
+                    </div>
+
+                    {/* Hero Photo - commanding centerpiece */}
+                    <div className="relative flex-1 my-2.5 overflow-hidden rounded-2xl border border-current/10 bg-black/10 flex items-center justify-center">
+                      <img
+                        src={outfit.resultImage}
+                        alt={customTitle || outfit.name}
+                        className="h-full w-full object-contain"
+                        crossOrigin="anonymous"
+                      />
+                    </div>
+
+                    {/* Bottom Editorial Caption */}
+                    <div className="shrink-0 space-y-2 pt-0.5">
+                      {/* Title & Subtitle + Palette Row */}
+                      <div>
+                        <h3 className="font-display text-base sm:text-lg font-bold leading-tight tracking-tight line-clamp-1">
+                          {customTitle || outfit.name}
+                        </h3>
+                        <div className="flex items-center justify-between mt-1 text-[11px] opacity-70">
+                          <span>
+                            Styled on {outfit.person?.name || "Studio Model"} • {scoreVal}% Harmony
+                          </span>
+                          {showHarmony && uniqueColors.length > 0 && (
+                            <div className="flex items-center gap-1.5">
+                              {uniqueColors.map((hex, i) => (
+                                <span
+                                  key={i}
+                                  className="h-3 w-3 rounded-full border border-black/20 shadow-sm shrink-0"
+                                  style={{ backgroundColor: hex }}
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Hairline Divider */}
+                      <div className="border-t border-current/10" />
+
+                      {/* Garments (Max 2 pieces side-by-side) */}
+                      {showGarments && displayGarments.length > 0 && (
+                        <div className="grid grid-cols-2 gap-2">
+                          {displayGarments.map((g) => (
+                            <div
+                              key={g.id}
+                              className={clsx(
+                                "flex items-center gap-2 p-1.5 rounded-xl border border-current/10",
+                                theme === "noir" ? "bg-[#181512]" : theme === "alabaster" ? "bg-[#ffffff]" : "bg-[#241a15]"
+                              )}
+                            >
+                              <img
+                                src={g.image}
+                                alt={g.name}
+                                className="h-9 w-9 rounded-lg object-cover border border-current/10 shrink-0 bg-black/10"
+                                crossOrigin="anonymous"
+                              />
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[11px] font-bold truncate leading-tight">
+                                  {g.name}
+                                </p>
+                                <p className="text-[9px] uppercase tracking-wider opacity-60 truncate">
+                                  {g.category}
+                                </p>
+                              </div>
+                              <span
+                                className="h-2.5 w-2.5 rounded-full border border-black/20 shrink-0 mr-1"
+                                style={{ backgroundColor: safeHex(g.colorHex, g.name) }}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Watermark */}
+                      <div className="text-center pt-1 border-t border-current/10">
+                        <span className="text-[9px] font-mono uppercase tracking-[0.2em] opacity-40">
+                          Wardrobe Studio • Story Archive
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 4:5 Portrait Layout */}
+                {ratio === "4:5" && (
+                  <div className="flex flex-col h-full p-4 justify-between">
+                    {/* Header */}
+                    <div className="flex items-center justify-between pb-2 border-b border-current/10 shrink-0">
+                      <span className="text-[10px] font-bold tracking-[0.22em] uppercase opacity-90">
+                        Wardrobe Studio
+                      </span>
+                      <span className="text-[10px] tracking-wider uppercase opacity-50 font-mono">
+                        {dateStr}
+                      </span>
+                    </div>
+
+                    {/* Middle Grid */}
+                    <div className="grid grid-cols-12 gap-3 flex-1 my-2 min-h-0">
+                      {/* Left: Photo */}
+                      <div className="col-span-7 rounded-2xl border border-current/10 bg-black/10 h-full overflow-hidden flex items-center justify-center">
+                        <img
+                          src={outfit.resultImage}
+                          alt={customTitle || outfit.name}
+                          className="h-full w-full object-contain"
+                          crossOrigin="anonymous"
+                        />
+                      </div>
+
+                      {/* Right: Details */}
+                      <div className="col-span-5 flex flex-col justify-between py-0.5">
+                        <div className="space-y-1">
+                          <span className="text-[9px] font-bold tracking-wider uppercase text-flame block">
+                            Curated OOTD
+                          </span>
+                          <h3 className="font-display text-base font-bold leading-snug line-clamp-2">
+                            {customTitle || outfit.name}
+                          </h3>
+                          <p className="text-[11px] opacity-70">
+                            Styled on {outfit.person?.name || "Studio Model"}
+                          </p>
+                        </div>
+
+                        <div className="border-t border-current/10 my-1" />
+
+                        {/* Garments */}
+                        {showGarments && displayGarments.length > 0 && (
+                          <div className="space-y-1.5 flex-1 my-1">
+                            <span className="text-[9px] font-bold uppercase tracking-wider opacity-60 block">
+                              Pieces
+                            </span>
+                            {displayGarments.map((g) => (
+                              <div
+                                key={g.id}
+                                className={clsx(
+                                  "flex items-center gap-2 p-1.5 rounded-xl border border-current/10",
+                                  theme === "noir" ? "bg-[#181512]" : theme === "alabaster" ? "bg-[#ffffff]" : "bg-[#241a15]"
+                                )}
+                              >
+                                <img
+                                  src={g.image}
+                                  alt={g.name}
+                                  className="h-8 w-8 rounded-lg object-cover border border-current/10 shrink-0 bg-black/10"
+                                  crossOrigin="anonymous"
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-[10px] font-bold truncate leading-tight">
+                                    {g.name}
+                                  </p>
+                                  <p className="text-[8px] uppercase tracking-wider opacity-60 truncate">
+                                    {g.category}
+                                  </p>
+                                </div>
+                                <span
+                                  className="h-2 w-2 rounded-full border border-black/20 shrink-0 mr-1"
+                                  style={{ backgroundColor: safeHex(g.colorHex, g.name) }}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Harmony Card */}
+                        {showHarmony && (
+                          <div
+                            className={clsx(
+                              "p-2 rounded-xl border border-current/10 mt-1",
+                              theme === "noir" ? "bg-[#181512]" : theme === "alabaster" ? "bg-[#ffffff]" : "bg-[#241a15]"
+                            )}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-base font-bold text-flame">
+                                {scoreVal}%
+                              </span>
+                              <div className="flex items-center gap-1">
+                                {uniqueColors.map((hex, i) => (
+                                  <span
+                                    key={i}
+                                    className="h-2.5 w-2.5 rounded-full border border-black/20 shrink-0"
+                                    style={{ backgroundColor: hex }}
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                            <p className="text-[9px] opacity-70 truncate mt-0.5">
+                              {pairAnalysis?.relation || "Complementary Match"}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Watermark */}
+                    <div className="text-center pt-1 border-t border-current/10">
+                      <span className="text-[9px] font-mono uppercase tracking-[0.2em] opacity-40">
+                        Wardrobe Studio • OOTD Archive
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* 1:1 Square Layout */}
+                {ratio === "1:1" && (
+                  <div className="flex flex-col h-full p-4 justify-between">
+                    {/* Header */}
+                    <div className="flex items-center justify-between pb-2 border-b border-current/10 shrink-0">
+                      <span className="text-[10px] font-bold tracking-[0.22em] uppercase opacity-90">
+                        Wardrobe Studio
+                      </span>
+                      <span className="text-[10px] tracking-wider uppercase opacity-50 font-mono">
+                        {dateStr}
+                      </span>
+                    </div>
+
+                    {/* Middle Grid */}
+                    <div className="grid grid-cols-12 gap-3 flex-1 my-2 min-h-0">
+                      {/* Left: Photo */}
+                      <div className="col-span-6 rounded-2xl border border-current/10 bg-black/10 h-full overflow-hidden flex items-center justify-center">
+                        <img
+                          src={outfit.resultImage}
+                          alt={customTitle || outfit.name}
+                          className="h-full w-full object-contain"
+                          crossOrigin="anonymous"
+                        />
+                      </div>
+
+                      {/* Right: Details */}
+                      <div className="col-span-6 flex flex-col justify-between py-0.5">
+                        <div className="space-y-1">
+                          <span className="text-[9px] font-bold tracking-wider uppercase text-flame block">
+                            Curated OOTD
+                          </span>
+                          <h3 className="font-display text-base font-bold leading-snug line-clamp-2">
+                            {customTitle || outfit.name}
+                          </h3>
+                          <p className="text-[11px] opacity-70">
+                            Styled on {outfit.person?.name || "Studio Model"}
+                          </p>
+                        </div>
+
+                        <div className="border-t border-current/10 my-1" />
+
+                        {/* Garments */}
+                        {showGarments && displayGarments.length > 0 && (
+                          <div className="space-y-1.5 flex-1 my-1">
+                            {displayGarments.map((g) => (
+                              <div
+                                key={g.id}
+                                className={clsx(
+                                  "flex items-center gap-2 p-1.5 rounded-xl border border-current/10",
+                                  theme === "noir" ? "bg-[#181512]" : theme === "alabaster" ? "bg-[#ffffff]" : "bg-[#241a15]"
+                                )}
+                              >
+                                <img
+                                  src={g.image}
+                                  alt={g.name}
+                                  className="h-8 w-8 rounded-lg object-cover border border-current/10 shrink-0 bg-black/10"
+                                  crossOrigin="anonymous"
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-[10px] font-bold truncate leading-tight">
+                                    {g.name}
+                                  </p>
+                                  <p className="text-[8px] uppercase tracking-wider opacity-60 truncate">
+                                    {g.category}
+                                  </p>
+                                </div>
+                                <span
+                                  className="h-2 w-2 rounded-full border border-black/20 shrink-0 mr-1"
+                                  style={{ backgroundColor: safeHex(g.colorHex, g.name) }}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Harmony row */}
+                        {showHarmony && (
+                          <div
+                            className={clsx(
+                              "p-1.5 rounded-xl border border-current/10 mt-1 flex items-center justify-between",
+                              theme === "noir" ? "bg-[#181512]" : theme === "alabaster" ? "bg-[#ffffff]" : "bg-[#241a15]"
+                            )}
+                          >
+                            <span className="text-xs font-bold text-flame">
+                              {scoreVal}% Match
+                            </span>
+                            <div className="flex items-center gap-1">
+                              {uniqueColors.map((hex, i) => (
+                                <span
+                                  key={i}
+                                  className="h-2.5 w-2.5 rounded-full border border-black/20 shrink-0"
+                                  style={{ backgroundColor: hex }}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Watermark */}
+                    <div className="text-center pt-1 border-t border-current/10">
+                      <span className="text-[9px] font-mono uppercase tracking-[0.2em] opacity-40">
+                        Wardrobe Studio • Minimal Archive
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Background Canvas for fallback export */}
+              <canvas ref={canvasRef} className="hidden" />
             </div>
-            <span className="text-[11px] text-ink-soft mt-3 font-mono">
-              High Resolution Composite • {ratio === "4:5" ? "1080×1350" : ratio === "9:16" ? "1080×1920" : "1080×1080"} PNG
+            <span className="text-xs text-ink-soft mt-3 font-mono">
+              Vector High-DPI Composite • {ratio === "4:5" ? "4:5 Portrait" : ratio === "9:16" ? "9:16 Story" : "1:1 Square"}
             </span>
           </div>
         </div>
@@ -797,7 +1430,8 @@ export function LookbookModal({ isOpen, onClose, outfit }: LookbookModalProps) {
           </div>
         </div>
       </motion.div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
