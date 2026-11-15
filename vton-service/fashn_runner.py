@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from PIL import Image
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -139,6 +139,7 @@ class FashnRunner:
         skip_cfg_last_n_steps: Optional[int] = None,
         guidance_scale: Optional[float] = None,
         seed: Optional[int] = None,
+        input_shape: Optional[Tuple[int, int]] = None,
         on_stage_change: Optional[Callable[..., None]] = None,
     ) -> Image.Image:
         """
@@ -189,6 +190,7 @@ class FashnRunner:
             skip_cfg_last_n_steps=skip_cfg,
             seed=s,
             segmentation_free=self.config.segmentation_free,
+            input_shape=input_shape,
             callback=_pipeline_callback,
         )
 

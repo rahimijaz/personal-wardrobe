@@ -242,6 +242,7 @@ export async function submitTryOnJob({
       skip_cfg_last_n_steps: params?.skipCfgLastNSteps ?? 5,
       guidance_scale: params?.guidanceScale ?? 2.0,
       seed: params?.randomSeed ? Math.floor(Math.random() * 1000000) : (params?.seed ?? 42),
+      resolution: params?.resolution ?? "756x504",
       device: params?.device ?? "directml",
     };
 

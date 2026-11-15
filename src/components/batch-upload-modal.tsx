@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   UploadCloud,
@@ -140,7 +141,7 @@ export function BatchUploadModal({
     setItems((prev) =>
       prev.map((it) =>
         it.status === "idle" || it.status === "failed"
-          ? { ...it, category: cat as GarmentCategory }
+          ? { ...it, category: cat as GarmentCategory, isAutoDetected: false }
           : it
       )
     );
@@ -189,13 +190,39 @@ export function BatchUploadModal({
     setItems([]);
   };
 
-  // Convert File to Base64 promise helper if not yet loaded
+  // Convert File to Base64 promise helper with client-side downscaling if oversized (> 1920px)
   const getFileDataUrl = (item: BatchItem): Promise<string> => {
     if (item.dataUrl) return Promise.resolve(item.dataUrl);
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
+      reader.onload = () => {
+        const rawUrl = reader.result as string;
+        if (typeof window === "undefined" || !rawUrl) {
+          resolve(rawUrl || "");
+          return;
+        }
+        const img = new Image();
+        img.onload = () => {
+          const maxDim = 1920;
+          if (img.width > maxDim || img.height > maxDim) {
+            const scale = Math.min(maxDim / img.width, maxDim / img.height);
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.max(1, Math.round(img.width * scale));
+            canvas.height = Math.max(1, Math.round(img.height * scale));
+            const ctx = canvas.getContext("2d");
+            if (ctx) {
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+              const mime = item.file.type === "image/png" ? "image/png" : "image/jpeg";
+              resolve(canvas.toDataURL(mime, 0.92));
+              return;
+            }
+          }
+          resolve(rawUrl);
+        };
+        img.onerror = () => resolve(rawUrl);
+        img.src = rawUrl;
+      };
+      reader.onerror = () => resolve("");
       reader.readAsDataURL(item.file);
     });
   };
@@ -230,18 +257,18 @@ export function BatchUploadModal({
           });
 
           if (bgRes.ok) {
-            const bgData = await bgRes.json();
-            if (bgData.image) {
+            let bgData: any = null;
+            try {
+              bgData = await bgRes.json();
+            } catch {
+              // Non-JSON response, ignore
+            }
+            if (bgData && bgData.image) {
               imageToSave = bgData.image;
               cutoutUrl = bgData.image;
-              // Re-verify category against clean cutout mask
-              if (cutoutUrl) {
-                try {
-                  const refinedCat = await detectCategoryFromImageSrc(cutoutUrl);
-                  if (refinedCat && refinedCat !== "tops" && item.category === "tops") {
-                    item.category = refinedCat;
-                  }
-                } catch {}
+              // Apply high-precision backend category detected on the clean cutout mask
+              if (bgData.category && item.isAutoDetected) {
+                item.category = bgData.category as GarmentCategory;
               }
             }
           } else {
@@ -283,11 +310,25 @@ export function BatchUploadModal({
       });
 
       if (!saveRes.ok) {
-        const errData = await saveRes.json();
-        throw new Error(errData.error || "Failed to save garment");
+        let errMsg = `Failed to save garment (${saveRes.status})`;
+        try {
+          const errData = await saveRes.json();
+          if (errData?.error) errMsg = errData.error;
+        } catch {
+          const text = await saveRes.text().catch(() => "");
+          if (text.includes("413") || saveRes.status === 413) {
+            errMsg = "Image is too large. Downscaled version will be used.";
+          }
+        }
+        throw new Error(errMsg);
       }
 
-      const saveData = await saveRes.json();
+      let saveData: any = null;
+      try {
+        saveData = await saveRes.json();
+      } catch {
+        throw new Error("Invalid response format received from server");
+      }
 
       setItems((prev) =>
         prev.map((it) =>
@@ -358,17 +399,33 @@ export function BatchUploadModal({
     (it) => it.status === "idle" || it.status === "removing_bg" || it.status === "saving"
   ).length;
 
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Lock body scroll when modal is open so the background page never scrolls
+  useEffect(() => {
+    if (isOpen) {
+      const prevOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = prevOverflow;
+      };
+    }
+  }, [isOpen]);
+
   const progressPercent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
-  if (!isOpen) return null;
+  if (!isOpen || !mounted) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4 backdrop-blur-xs overflow-y-auto">
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4 sm:p-6 backdrop-blur-sm overflow-y-auto">
       <motion.div
         initial={{ opacity: 0, scale: 0.96 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.96 }}
-        className="relative w-full max-w-3xl rounded-3xl border border-line bg-paper p-6 sm:p-8 shadow-2xl my-6 flex flex-col max-h-[90vh]"
+        className="relative w-full max-w-3xl rounded-3xl border border-line bg-paper p-6 sm:p-8 shadow-2xl m-auto flex flex-col max-h-[88vh]"
       >
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-line">
@@ -564,7 +621,45 @@ export function BatchUploadModal({
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 text-xs">
-                      {/* Category selector */}
+                      {/* 1-Click Top / Bottom Quick Toggles */}
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={isProcessing || item.status === "completed"}
+                          onClick={() => {
+                            setItems((prev) =>
+                              prev.map((it) => (it.id === item.id ? { ...it, category: "tops", isAutoDetected: false } : it))
+                            );
+                          }}
+                          className={clsx(
+                            "px-2 py-0.5 rounded text-[11px] font-semibold transition-all cursor-pointer border",
+                            item.category === "tops"
+                              ? "bg-flame text-white border-flame shadow-xs"
+                              : "bg-paper text-ink-soft border-line hover:text-ink hover:bg-bone"
+                          )}
+                        >
+                          Top
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isProcessing || item.status === "completed"}
+                          onClick={() => {
+                            setItems((prev) =>
+                              prev.map((it) => (it.id === item.id ? { ...it, category: "bottoms", isAutoDetected: false } : it))
+                            );
+                          }}
+                          className={clsx(
+                            "px-2 py-0.5 rounded text-[11px] font-semibold transition-all cursor-pointer border",
+                            item.category === "bottoms"
+                              ? "bg-flame text-white border-flame shadow-xs"
+                              : "bg-paper text-ink-soft border-line hover:text-ink hover:bg-bone"
+                          )}
+                        >
+                          Bottom
+                        </button>
+                      </div>
+
+                      {/* Category selector dropdown for other types */}
                       <div className="flex items-center gap-1.5">
                         <select
                           value={item.category}
@@ -755,7 +850,8 @@ export function BatchUploadModal({
           </div>
         </div>
       </motion.div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

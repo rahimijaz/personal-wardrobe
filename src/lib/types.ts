@@ -130,6 +130,66 @@ export interface VtonJob {
   garments?: Garment[];
 }
 
+export type VtonResolution = "672x444" | "756x504" | "864x576" | "1008x672";
+
+export interface VtonResolutionOption {
+  id: VtonResolution;
+  label: string;
+  shortLabel: string;
+  height: number;
+  width: number;
+  description: string;
+  vramTier: string;
+  badge?: string;
+  sharpness: string;
+}
+
+export const VTON_RESOLUTION_OPTIONS: VtonResolutionOption[] = [
+  {
+    id: "672x444",
+    label: "Standard",
+    shortLabel: "672 × 444",
+    height: 672,
+    width: 444,
+    description: "Fastest generation • Low VRAM requirement",
+    vramTier: "4 GB",
+    sharpness: "Baseline",
+  },
+  {
+    id: "756x504",
+    label: "High Quality",
+    shortLabel: "756 × 504",
+    height: 756,
+    width: 504,
+    description: "Crisper fabric weave & seams • Recommended default",
+    vramTier: "6 GB",
+    badge: "Default",
+    sharpness: "+28% Detail",
+  },
+  {
+    id: "864x576",
+    label: "Ultra Detail",
+    shortLabel: "864 × 576",
+    height: 864,
+    width: 576,
+    description: "Deep texture definition & sharp logos • Slower render",
+    vramTier: "8 GB",
+    badge: "Ultra",
+    sharpness: "+66% Detail",
+  },
+  {
+    id: "1008x672",
+    label: "Studio Cinema",
+    shortLabel: "1008 × 672",
+    height: 1008,
+    width: 672,
+    description: "Maximum density • Requires high-end dedicated VRAM",
+    vramTier: "12+ GB",
+    badge: "Cinema",
+    sharpness: "+125% Detail",
+  },
+];
+
 export interface InferenceParameters {
   numTimesteps: number;
   skipCfgLastNSteps: number;
@@ -137,6 +197,7 @@ export interface InferenceParameters {
   seed: number;
   randomSeed: boolean;
   garmentPhotoType: GarmentPhotoType;
+  resolution: VtonResolution;
   device: string;
 }
 
@@ -147,6 +208,7 @@ export const DEFAULT_INFERENCE_PARAMETERS: InferenceParameters = {
   seed: 42,
   randomSeed: false,
   garmentPhotoType: "flat-lay",
+  resolution: "756x504",
   device: "directml",
 };
 

@@ -20,9 +20,11 @@ import {
   RotateCcw,
   Dices,
   CheckCircle2,
+  Maximize2,
 } from "lucide-react";
 import clsx from "clsx";
 import { useWardrobe } from "@/context/wardrobe-context";
+import { VTON_RESOLUTION_OPTIONS, type VtonResolution } from "@/lib/types";
 
 export default function SettingsPage() {
   const {
@@ -39,6 +41,14 @@ export default function SettingsPage() {
   const [testingConnection, setTestingConnection] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [savedToast, setSavedToast] = useState(false);
+
+  const activeResOption =
+    VTON_RESOLUTION_OPTIONS.find((opt) => opt.id === inferenceParams.resolution) ||
+    VTON_RESOLUTION_OPTIONS[1];
+  const activeResIndex = Math.max(
+    0,
+    VTON_RESOLUTION_OPTIONS.findIndex((opt) => opt.id === activeResOption.id)
+  );
 
   const handleTestConnection = async () => {
     setTestingConnection(true);
@@ -189,81 +199,122 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          {/* Quick Presets */}
-          <div className="mb-6 rounded-2xl border border-line bg-bone p-4">
-            <div className="flex items-center gap-2 mb-2.5 text-xs font-bold uppercase tracking-wider text-ink-soft">
-              <Zap className="h-3.5 w-3.5 text-flame" />
-              <span>Speed & Quality Presets</span>
+          {/* Resolution & Quality Slider */}
+          <div className="mb-6 rounded-2xl border border-line bg-bone p-4 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-line/60 pb-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Maximize2 className="h-4 w-4 text-flame" />
+                  <span className="text-xs font-bold uppercase tracking-wider text-ink">
+                    Try-On Diffusion Resolution
+                  </span>
+                </div>
+                <p className="text-[11px] text-ink-soft mt-0.5">
+                  Controls internal latent dimensions for the FASHN-VTON diffusion transformer.
+                </p>
+              </div>
+
+              {/* Active Badge */}
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <span className="font-mono text-xs font-bold text-flame bg-paper px-2.5 py-1 rounded-full border border-flame/30 shadow-2xs">
+                  {activeResOption.shortLabel}
+                </span>
+                <span className="font-mono text-[10px] text-ink-soft bg-paper/60 px-2 py-0.5 rounded-full border border-line">
+                  {activeResOption.sharpness}
+                </span>
+              </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
-              <button
-                type="button"
-                onClick={() => {
-                  updateInferenceParams({ numTimesteps: 8, skipCfgLastNSteps: 5, guidanceScale: 2.0 });
-                  setSavedToast(true);
-                  setTimeout(() => setSavedToast(false), 2000);
-                }}
-                className={clsx(
-                  "p-3 rounded-xl border text-left transition-all cursor-pointer",
-                  inferenceParams.numTimesteps === 8 && inferenceParams.skipCfgLastNSteps === 5
-                    ? "border-flame bg-paper font-semibold shadow-xs ring-1 ring-flame/30"
-                    : "border-line bg-paper/60 hover:bg-paper"
-                )}
-              >
-                <div className="flex items-center justify-between text-ink font-bold">
-                  <span>⚡ DirectML Fast</span>
-                  <span className="font-mono text-[10px] text-flame">8 steps</span>
-                </div>
-                <p className="mt-1 text-[11px] text-ink-soft leading-tight">
-                  Recommended default (~1.5 min). Fast iterations with crisp fabric texture.
-                </p>
-              </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  updateInferenceParams({ numTimesteps: 14, skipCfgLastNSteps: 6, guidanceScale: 2.5 });
-                  setSavedToast(true);
-                  setTimeout(() => setSavedToast(false), 2000);
+            {/* Slider */}
+            <div className="space-y-1.5 px-1">
+              <input
+                type="range"
+                min="0"
+                max={VTON_RESOLUTION_OPTIONS.length - 1}
+                step="1"
+                value={activeResIndex}
+                onChange={(e) => {
+                  const targetOpt = VTON_RESOLUTION_OPTIONS[Number(e.target.value)];
+                  if (targetOpt) {
+                    updateInferenceParams({ resolution: targetOpt.id });
+                    setSavedToast(true);
+                    setTimeout(() => setSavedToast(false), 2000);
+                  }
                 }}
-                className={clsx(
-                  "p-3 rounded-xl border text-left transition-all cursor-pointer",
-                  inferenceParams.numTimesteps === 14
-                    ? "border-flame bg-paper font-semibold shadow-xs ring-1 ring-flame/30"
-                    : "border-line bg-paper/60 hover:bg-paper"
-                )}
-              >
-                <div className="flex items-center justify-between text-ink font-bold">
-                  <span>💎 Studio Quality</span>
-                  <span className="font-mono text-[10px] text-flame">14 steps</span>
-                </div>
-                <p className="mt-1 text-[11px] text-ink-soft leading-tight">
-                  Extra micro-textures & complex draping folds (~3.0 min).
-                </p>
-              </button>
+                className="w-full accent-flame h-2 bg-bone-deep rounded-lg cursor-pointer"
+              />
+              <div className="flex items-center justify-between text-[10px] font-mono text-ink-soft">
+                {VTON_RESOLUTION_OPTIONS.map((opt, idx) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => {
+                      updateInferenceParams({ resolution: opt.id });
+                      setSavedToast(true);
+                      setTimeout(() => setSavedToast(false), 2000);
+                    }}
+                    className={clsx(
+                      "cursor-pointer hover:text-ink transition-colors",
+                      activeResIndex === idx ? "font-bold text-flame" : "text-ink-soft"
+                    )}
+                  >
+                    {opt.shortLabel}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  updateInferenceParams({ numTimesteps: 5, skipCfgLastNSteps: 4, guidanceScale: 1.8 });
-                  setSavedToast(true);
-                  setTimeout(() => setSavedToast(false), 2000);
-                }}
-                className={clsx(
-                  "p-3 rounded-xl border text-left transition-all cursor-pointer",
-                  inferenceParams.numTimesteps === 5
-                    ? "border-flame bg-paper font-semibold shadow-xs ring-1 ring-flame/30"
-                    : "border-line bg-paper/60 hover:bg-paper"
-                )}
-              >
-                <div className="flex items-center justify-between text-ink font-bold">
-                  <span>🚀 Ultra Fast</span>
-                  <span className="font-mono text-[10px] text-flame">5 steps</span>
-                </div>
-                <p className="mt-1 text-[11px] text-ink-soft leading-tight">
-                  Quick previews in under ~50 seconds. Great for rapid color matching.
-                </p>
-              </button>
+            {/* Tier Cards Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs pt-1">
+              {VTON_RESOLUTION_OPTIONS.map((opt) => {
+                const isSelected = inferenceParams.resolution === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => {
+                      updateInferenceParams({ resolution: opt.id });
+                      setSavedToast(true);
+                      setTimeout(() => setSavedToast(false), 2000);
+                    }}
+                    className={clsx(
+                      "p-3 rounded-xl border text-left transition-all cursor-pointer relative flex flex-col justify-between",
+                      isSelected
+                        ? "border-flame bg-paper font-semibold shadow-xs ring-1 ring-flame/30"
+                        : "border-line bg-paper/60 hover:bg-paper"
+                    )}
+                  >
+                    <div>
+                      <div className="flex items-center justify-between text-ink font-bold mb-1">
+                        <span className="truncate">{opt.label}</span>
+                        {opt.badge && (
+                          <span
+                            className={clsx(
+                              "text-[9px] font-mono font-bold px-1.5 py-0.2 rounded-full",
+                              opt.badge === "Default"
+                                ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30"
+                                : "bg-flame/10 text-flame border border-flame/20"
+                            )}
+                          >
+                            {opt.badge}
+                          </span>
+                        )}
+                      </div>
+                      <div className="font-mono text-[11px] text-flame font-bold">
+                        {opt.shortLabel}
+                      </div>
+                      <p className="mt-1 text-[10px] text-ink-soft leading-tight line-clamp-2">
+                        {opt.description}
+                      </p>
+                    </div>
+
+                    <div className="mt-2.5 pt-2 border-t border-line/60 flex items-center justify-between text-[10px] font-mono text-ink-soft">
+                      <span>VRAM: {opt.vramTier}</span>
+                      <span className="font-semibold text-ink">{opt.sharpness}</span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
 

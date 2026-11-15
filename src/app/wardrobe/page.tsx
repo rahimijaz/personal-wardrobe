@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -27,6 +28,7 @@ import {
   RefreshCw,
   Compass,
   Palette,
+  Edit2,
 } from "lucide-react";
 import clsx from "clsx";
 import { useWardrobe } from "@/context/wardrobe-context";
@@ -47,6 +49,7 @@ export default function WardrobePage() {
     isLoadingGarments,
     refreshGarments,
     toggleFavoriteGarment,
+    renameGarment,
     deleteGarment,
   } = useWardrobe();
 
@@ -60,6 +63,38 @@ export default function WardrobePage() {
   const [isWindowDragging, setIsWindowDragging] = useState(false);
   const dragCounterRef = useRef(0);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Garment renaming state
+  const [editingGarmentId, setEditingGarmentId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState<string>("");
+  const [isSavingRename, setIsSavingRename] = useState<boolean>(false);
+
+  const handleStartRename = (garment: Garment, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setEditingGarmentId(garment.id);
+    setEditingName(garment.name);
+  };
+
+  const handleSaveRename = async (garmentId: string, e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const trimmed = editingName.trim();
+    if (!trimmed) {
+      setEditingGarmentId(null);
+      return;
+    }
+    setIsSavingRename(true);
+    try {
+      await renameGarment(garmentId, trimmed);
+    } finally {
+      setIsSavingRename(false);
+      setEditingGarmentId(null);
+    }
+  };
 
   // Drag and drop overlay handlers for bulk file dropping anywhere on page
   const handleWindowDragEnter = (e: React.DragEvent) => {
@@ -142,21 +177,23 @@ export default function WardrobePage() {
       className="flex-1 p-6 sm:p-8 md:p-10 max-w-7xl mx-auto w-full page-enter relative"
     >
       {/* Full-Screen Drag and Drop Overlay */}
-      {isWindowDragging && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/75 backdrop-blur-md pointer-events-none p-6 animate-fadeIn">
-          <div className="flex flex-col items-center justify-center rounded-3xl border-3 border-dashed border-flame bg-paper/95 p-10 text-center shadow-2xl max-w-md w-full">
-            <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-flame/15 text-flame mb-4 animate-bounce">
-              <UploadCloud className="h-10 w-10" />
+      {isWindowDragging && mounted &&
+        createPortal(
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md pointer-events-none p-6 animate-fadeIn">
+            <div className="flex flex-col items-center justify-center rounded-3xl border-3 border-dashed border-flame bg-paper/95 p-10 text-center shadow-2xl max-w-md w-full">
+              <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-flame/15 text-flame mb-4 animate-bounce">
+                <UploadCloud className="h-10 w-10" />
+              </div>
+              <h3 className="font-display text-2xl font-bold text-ink">
+                Drop Clothing to Import
+              </h3>
+              <p className="mt-2 text-xs text-ink-soft leading-relaxed">
+                Release files anywhere to open the Batch Ingestion Studio with automated RMBG-1.4 background removal and color extraction.
+              </p>
             </div>
-            <h3 className="font-display text-2xl font-bold text-ink">
-              Drop Clothing to Import
-            </h3>
-            <p className="mt-2 text-xs text-ink-soft leading-relaxed">
-              Release files anywhere to open the Batch Ingestion Studio with automated RMBG-1.4 background removal and color extraction.
-            </p>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
 
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
@@ -397,11 +434,11 @@ export default function WardrobePage() {
                 className="group relative flex flex-col overflow-hidden rounded-2xl border border-line bg-paper shadow-xs transition-all duration-200 hover:-translate-y-1 hover:shadow-md"
               >
                 {/* Image Container */}
-                <div className="relative aspect-[3/4] w-full overflow-hidden bg-bone-deep">
+                <div className="relative aspect-[3/4] w-full overflow-hidden bg-white dark:bg-white flex items-center justify-center p-2.5">
                   <img
                     src={garment.image}
                     alt={garment.name}
-                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                    className="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
                   />
 
                   {/* Favorite Button */}
@@ -436,22 +473,74 @@ export default function WardrobePage() {
                 {/* Info Card */}
                 <div className="p-3.5 flex flex-col justify-between flex-1">
                   <div>
-                    <div className="flex items-center justify-between gap-1.5">
-                      <h3 className="font-semibold text-xs text-ink truncate">
-                        {garment.name}
-                      </h3>
-                      {garment.colorHex && (
-                        <div className="flex items-center -space-x-1 shrink-0" title={`Color: ${garment.color || garment.colorHex}`}>
-                          <span
-                            className="h-3 w-3 rounded-full border border-black/20 z-10"
-                            style={{ backgroundColor: garment.colorHex }}
+                    <div className="flex items-center justify-between gap-1.5 min-h-[26px]">
+                      {editingGarmentId === garment.id ? (
+                        <form
+                          onSubmit={(e) => handleSaveRename(garment.id, e)}
+                          className="flex items-center gap-1 w-full"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            type="text"
+                            autoFocus
+                            value={editingName}
+                            disabled={isSavingRename}
+                            onChange={(e) => setEditingName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") setEditingGarmentId(null);
+                            }}
+                            className="w-full text-xs font-semibold text-ink bg-bone dark:bg-paper-deep px-1.5 py-0.5 rounded border border-flame focus:outline-none"
                           />
-                          {garment.secondaryColorHex && (
-                            <span
-                              className="h-3 w-3 rounded-full border border-black/20"
-                              style={{ backgroundColor: garment.secondaryColorHex }}
-                              title={`Secondary: ${garment.secondaryColor || garment.secondaryColorHex}`}
-                            />
+                          <button
+                            type="submit"
+                            disabled={isSavingRename}
+                            className="p-1 rounded text-ink-soft hover:text-flame hover:bg-bone transition-colors"
+                            title="Save"
+                          >
+                            <Check className="h-3 w-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingGarmentId(null)}
+                            className="p-1 rounded text-ink-soft hover:text-ink hover:bg-bone transition-colors"
+                            title="Cancel"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </form>
+                      ) : (
+                        <div className="flex items-center justify-between gap-1.5 w-full group/title">
+                          <div className="flex items-center gap-1 min-w-0">
+                            <h3
+                              onClick={(e) => handleStartRename(garment, e)}
+                              className="font-semibold text-xs text-ink truncate cursor-pointer hover:text-flame transition-colors"
+                              title="Click to rename"
+                            >
+                              {garment.name}
+                            </h3>
+                            <button
+                              onClick={(e) => handleStartRename(garment, e)}
+                              className="opacity-0 group-hover/title:opacity-100 p-0.5 text-ink-soft hover:text-flame transition-opacity shrink-0"
+                              title="Rename piece"
+                              aria-label="Rename piece"
+                            >
+                              <Edit2 className="h-2.5 w-2.5" />
+                            </button>
+                          </div>
+                          {garment.colorHex && (
+                            <div className="flex items-center -space-x-1 shrink-0" title={`Color: ${garment.color || garment.colorHex}`}>
+                              <span
+                                className="h-3 w-3 rounded-full border border-black/20 z-10"
+                                style={{ backgroundColor: garment.colorHex }}
+                              />
+                              {garment.secondaryColorHex && (
+                                <span
+                                  className="h-3 w-3 rounded-full border border-black/20"
+                                  style={{ backgroundColor: garment.secondaryColorHex }}
+                                  title={`Secondary: ${garment.secondaryColor || garment.secondaryColorHex}`}
+                                />
+                              )}
+                            </div>
                           )}
                         </div>
                       )}
@@ -527,12 +616,61 @@ export default function WardrobePage() {
                   <img
                     src={garment.image}
                     alt={garment.name}
-                    className="h-16 w-14 rounded-xl border border-line object-cover"
+                    className="h-16 w-14 rounded-xl border border-line bg-white object-contain p-1"
                   />
                   <div>
-                    <h3 className="font-semibold text-sm text-ink">
-                      {garment.name}
-                    </h3>
+                    {editingGarmentId === garment.id ? (
+                      <form
+                        onSubmit={(e) => handleSaveRename(garment.id, e)}
+                        className="flex items-center gap-1.5"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <input
+                          type="text"
+                          autoFocus
+                          value={editingName}
+                          disabled={isSavingRename}
+                          onChange={(e) => setEditingName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape") setEditingGarmentId(null);
+                          }}
+                          className="text-sm font-semibold text-ink bg-bone dark:bg-paper-deep px-2 py-0.5 rounded border border-flame focus:outline-none"
+                        />
+                        <button
+                          type="submit"
+                          disabled={isSavingRename}
+                          className="p-1 rounded text-ink-soft hover:text-flame"
+                          title="Save"
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingGarmentId(null)}
+                          className="p-1 rounded text-ink-soft hover:text-ink"
+                          title="Cancel"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </form>
+                    ) : (
+                      <div className="flex items-center gap-1.5 group/listtitle">
+                        <h3
+                          onClick={(e) => handleStartRename(garment, e)}
+                          className="font-semibold text-sm text-ink cursor-pointer hover:text-flame transition-colors"
+                          title="Click to rename"
+                        >
+                          {garment.name}
+                        </h3>
+                        <button
+                          onClick={(e) => handleStartRename(garment, e)}
+                          className="opacity-0 group-hover/listtitle:opacity-100 p-0.5 text-ink-soft hover:text-flame transition-opacity"
+                          title="Rename piece"
+                        >
+                          <Edit2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    )}
                     <div className="flex items-center gap-2 mt-1 text-xs text-ink-soft">
                       {garment.colorHex && (
                         <div className="flex items-center -space-x-1 shrink-0" title={`Color: ${garment.color || garment.colorHex}`}>
@@ -659,6 +797,22 @@ function AddGarmentModal({
   const [showOriginal, setShowOriginal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Lock body scroll when modal is open so the background page never scrolls
+  useEffect(() => {
+    if (isOpen) {
+      const prevOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = prevOverflow;
+      };
+    }
+  }, [isOpen]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -786,15 +940,15 @@ function AddGarmentModal({
     }
   };
 
-  if (!isOpen) return null;
+  if (!isOpen || !mounted) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4 backdrop-blur-xs overflow-y-auto">
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4 sm:p-6 backdrop-blur-sm overflow-y-auto">
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
-        className="relative w-full max-w-xl rounded-3xl border border-line bg-paper p-6 sm:p-8 shadow-2xl my-8"
+        className="relative w-full max-w-xl rounded-3xl border border-line bg-paper p-6 sm:p-8 shadow-2xl m-auto max-h-[90vh] overflow-y-auto"
       >
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-line mb-6">
@@ -1108,6 +1262,7 @@ function AddGarmentModal({
           </div>
         </form>
       </motion.div>
-    </div>
+    </div>,
+    document.body
   );
 }

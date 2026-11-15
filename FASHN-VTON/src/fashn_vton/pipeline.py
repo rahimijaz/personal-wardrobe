@@ -4,7 +4,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
-from typing import Callable, List, Literal, Optional
+from typing import Callable, List, Literal, Optional, Tuple
 import torch_directml
 import cv2
 import numpy as np
@@ -94,6 +94,38 @@ class TryOnPipeline:
 
         # Setup transforms (derived from model input shape)
         h, w = self.tryon_model.input_shape
+        max_dim = max(h, w)
+        self.pre_resize = AspectPreserveResize(target_size=(max_dim, max_dim), mode="fit", backend="pil")
+        self.resize_pad_fn = ResizePad((w, h), backend="opencv")
+
+    def set_input_shape(self, input_shape: Tuple[int, int]):
+        """Dynamically update input resolution (must be divisible by patch_size 12)."""
+        h, w = int(input_shape[0]), int(input_shape[1])
+        patch_size = getattr(self.tryon_model, "patch_size", 12)
+        if h % patch_size != 0 or w % patch_size != 0:
+            raise ValueError(f"Resolution ({h}, {w}) must be divisible by patch_size {patch_size}")
+
+        if getattr(self.tryon_model, "input_shape", None) == (h, w):
+            return
+
+        self.logger.info(f"Dynamically updating TryOnModel input_shape from {self.tryon_model.input_shape} to {(h, w)}")
+        self.tryon_model.input_shape = (h, w)
+        if hasattr(self.tryon_model, "x_embedder"):
+            self.tryon_model.x_embedder.img_size = (h, w)
+            self.tryon_model.x_embedder.grid_size = (h // patch_size, w // patch_size)
+            self.tryon_model.x_embedder.num_patches = (h // patch_size) * (w // patch_size)
+        if hasattr(self.tryon_model, "garment_embedder"):
+            self.tryon_model.garment_embedder.img_size = (h, w)
+            self.tryon_model.garment_embedder.grid_size = (h // patch_size, w // patch_size)
+            self.tryon_model.garment_embedder.num_patches = (h // patch_size) * (w // patch_size)
+
+        # Clear cached positional embeddings & static garment tokens for the new resolution
+        self.tryon_model._cached_pe = None
+        self.tryon_model._cached_x_pe = None
+        self.tryon_model._cached_garment_key = None
+        self.tryon_model._cached_garment_cond = None
+        self.tryon_model._cached_garment_uncond = None
+
         max_dim = max(h, w)
         self.pre_resize = AspectPreserveResize(target_size=(max_dim, max_dim), mode="fit", backend="pil")
         self.resize_pad_fn = ResizePad((w, h), backend="opencv")
@@ -268,30 +300,15 @@ class TryOnPipeline:
         skip_cfg_last_n_steps: int = 5,
         seed: int = 42,
         segmentation_free: bool = True,
+        input_shape: Optional[Tuple[int, int]] = None,
         callback: Optional[Callable[[str, int, int, str], None]] = None,
     ) -> PipelineOutput:
         """
         Run virtual try-on inference.
-
-        Args:
-            person_image: RGB image of the person to dress.
-            garment_image: RGB image of the garment (model photo or flat-lay).
-            category: Garment category - "tops", "bottoms", or "one-pieces".
-            garment_photo_type: "model" if garment is worn by a person,
-                "flat-lay" for product shots on plain backgrounds.
-            num_samples: Number of output images to generate (1-4).
-            num_timesteps: Diffusion sampling steps. Higher = better quality, slower.
-                Recommended: 20 (fast), 30 (balanced), 50 (quality).
-            guidance_scale: Classifier-free guidance strength.
-            skip_cfg_last_n_steps: Skip CFG for final N steps to prevent color saturation.
-            seed: Random seed for reproducibility.
-            segmentation_free: If True, generate without masking the person image.
-                Recommended for better body preservation and unconstrained garment volume
-                (allows garments to expand beyond the original outfit's boundaries).
-
-        Returns:
-            PipelineOutput with `images` list containing generated PIL Images.
         """
+        if input_shape is not None:
+            self.set_input_shape(input_shape)
+
         # Set seed
         torch.manual_seed(seed)
         if self.device.type == "cuda":

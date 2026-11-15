@@ -279,22 +279,40 @@ export function detectCategoryFromPixels(
   const topToBottomRatio = avgTopWidth / Math.max(1, avgBottomWidth);
   const legSplitRatio = bottomRows ? bottomCenterEmptyRows / bottomRows : 0;
 
-  // Bottoms: clear leg split OR tall silhouette not flared at shoulders
-  if (legSplitRatio > 0.18 || (aspectRatio >= 1.3 && topToBottomRatio < 1.15)) {
+  // 1. Bottoms: clear leg split (void in middle of lower half)
+  if (legSplitRatio >= 0.25 && aspectRatio >= 1.05) {
     return "bottoms";
   }
 
-  // Dresses: very elongated without leg split
-  if (aspectRatio >= 1.7 && legSplitRatio <= 0.08) {
+  // 2. Dresses / One-pieces: only if unmistakable flared A-line dress silhouette
+  // (widely flared hem at bottom: bottom is > 1.5x wider than top bodice and no leg split)
+  if (aspectRatio >= 1.55 && topToBottomRatio <= 0.60 && legSplitRatio <= 0.05) {
     return "one-pieces";
   }
 
-  // Tops: standard upper garment
+  // 3. Tall garments (aspectRatio >= 1.25):
+  if (aspectRatio >= 1.25) {
+    // Upper garment with sleeves: shoulders/sleeves are significantly wider than waist
+    if (topToBottomRatio >= 1.12 && legSplitRatio <= 0.05) {
+      return "tops";
+    }
+    // Tall straight/narrow silhouette is pants / trousers (bottoms)
+    return "bottoms";
+  }
+
+  // 4. Standard height / boxy garments (aspectRatio < 1.25):
+  // Only shorts with a clear wide leg split are bottoms
+  if (legSplitRatio >= 0.35) {
+    return "bottoms";
+  }
+
+  // Tops: standard upper garment (shirts, tees, sweaters, jackets)
   return "tops";
 }
 
 /**
  * Client-safe image category detection using an off-screen HTML canvas.
+ * Preserves the true natural aspect ratio of the image.
  */
 export function detectCategoryFromImageSrc(imageSrc: string): Promise<GarmentCategory> {
   return new Promise((resolve) => {
@@ -306,9 +324,14 @@ export function detectCategoryFromImageSrc(imageSrc: string): Promise<GarmentCat
     img.crossOrigin = "anonymous";
     img.onload = () => {
       try {
+        const maxDim = 120;
+        const naturalW = img.naturalWidth || img.width || 120;
+        const naturalH = img.naturalHeight || img.height || 120;
+        const scale = Math.min(maxDim / naturalW, maxDim / naturalH);
+        const w = Math.max(16, Math.round(naturalW * scale));
+        const h = Math.max(16, Math.round(naturalH * scale));
+
         const canvas = document.createElement("canvas");
-        const w = 96;
-        const h = 96;
         canvas.width = w;
         canvas.height = h;
         const ctx = canvas.getContext("2d");

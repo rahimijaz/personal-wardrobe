@@ -29,6 +29,7 @@ import {
   Scissors,
   Compass,
   TrendingUp,
+  Maximize2,
 } from "lucide-react";
 import clsx from "clsx";
 import { useWardrobe } from "@/context/wardrobe-context";
@@ -36,10 +37,12 @@ import { getMatchesForGarment, scorePair } from "@/lib/recommendations";
 import {
   VTON_CATEGORIES,
   CATEGORY_LABEL,
+  VTON_RESOLUTION_OPTIONS,
   type Garment,
   type Person,
   type VtonCategory,
   type GarmentPhotoType,
+  type VtonResolution,
 } from "@/lib/types";
 
 export default function TryOnPage() {
@@ -91,6 +94,19 @@ function TryOnContent() {
   const [isCancelling, setIsCancelling] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [resultNaturalDim, setResultNaturalDim] = useState<{ width: number; height: number } | null>(null);
+
+  const activeResOption =
+    VTON_RESOLUTION_OPTIONS.find((opt) => opt.id === inferenceParams.resolution) ||
+    VTON_RESOLUTION_OPTIONS[1];
+  const activeResIndex = Math.max(
+    0,
+    VTON_RESOLUTION_OPTIONS.findIndex((opt) => opt.id === activeResOption.id)
+  );
+
+  const jobResOpt =
+    VTON_RESOLUTION_OPTIONS.find((opt) => opt.id === activeJob?.params?.resolution) ||
+    activeResOption;
 
   // Initialize selections
   useEffect(() => {
@@ -339,14 +355,20 @@ function TryOnContent() {
                     <Sparkles className="h-2.5 w-2.5" />
                     Tailored Result
                   </span>
-                  <span className="text-[10px] font-mono text-ink-soft">
-                    1024 × 1536 HD
+                  <span className="text-[10px] font-mono text-ink-soft bg-bone px-2 py-0.5 rounded border border-line">
+                    {resultNaturalDim ? `${resultNaturalDim.width} × ${resultNaturalDim.height} px` : jobResOpt.shortLabel} • {jobResOpt.label}
                   </span>
                 </div>
                 <div className="relative aspect-[2/3] w-full overflow-hidden bg-[#fafafa] flex items-center justify-center">
                   <img
                     src={activeJob.result!}
                     alt="Generated Virtual Try-On Result"
+                    onLoad={(e) => {
+                      const img = e.currentTarget;
+                      if (img.naturalWidth && img.naturalHeight) {
+                        setResultNaturalDim({ width: img.naturalWidth, height: img.naturalHeight });
+                      }
+                    }}
                     className="h-full w-full object-contain"
                   />
                 </div>
@@ -400,9 +422,9 @@ function TryOnContent() {
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-ink-soft">Studio Mode</span>
-                  <span className="font-semibold text-emerald-700 dark:text-emerald-300">
-                    High Resolution
+                  <span className="text-ink-soft">Render Resolution</span>
+                  <span className="font-mono font-semibold text-emerald-700 dark:text-emerald-300">
+                    {resultNaturalDim ? `${resultNaturalDim.width} × ${resultNaturalDim.height} px` : jobResOpt.shortLabel} ({jobResOpt.label})
                   </span>
                 </div>
               </div>
@@ -637,8 +659,8 @@ function TryOnContent() {
                       Studio Renderer ~ Live Progression
                     </span>
                   </div>
-                  <div className="font-mono text-[10px] text-white/50">
-                    High Resolution
+                  <div className="font-mono text-[10px] text-white/70 bg-white/10 px-2 py-0.5 rounded">
+                    {jobResOpt.shortLabel} • {jobResOpt.label}
                   </div>
                 </div>
 
@@ -1140,6 +1162,60 @@ function TryOnContent() {
                   <span>30 (Maximum Detail)</span>
                 </div>
               </div>
+
+              {/* Resolution & Quality Selector */}
+              <div className="pt-3 mt-3 border-t border-line/60 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-ink">
+                    <Maximize2 className="h-3.5 w-3.5 text-flame" />
+                    <span className="uppercase tracking-wider">Resolution:</span>
+                    <span className="font-mono text-flame">{activeResOption.shortLabel}</span>
+                  </div>
+                  <span className="font-mono text-[10px] bg-paper px-2 py-0.5 rounded border border-line text-ink-soft">
+                    {activeResOption.sharpness} • {activeResOption.vramTier} VRAM
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                  {VTON_RESOLUTION_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => updateInferenceParams({ resolution: opt.id })}
+                      className={clsx(
+                        "py-1.5 px-2 rounded-lg text-xs font-mono font-semibold transition-all cursor-pointer text-center flex flex-col items-center justify-center gap-0.5",
+                        inferenceParams.resolution === opt.id
+                          ? "bg-flame text-white shadow-xs"
+                          : "bg-paper border border-line text-ink hover:bg-bone-deep"
+                      )}
+                    >
+                      <span className="text-[11px] font-bold">{opt.shortLabel}</span>
+                      <span
+                        className={clsx(
+                          "text-[9px]",
+                          inferenceParams.resolution === opt.id ? "text-white/80" : "text-ink-soft"
+                        )}
+                      >
+                        {opt.label}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Slider for resolution */}
+                <input
+                  type="range"
+                  min="0"
+                  max={VTON_RESOLUTION_OPTIONS.length - 1}
+                  step="1"
+                  value={activeResIndex}
+                  onChange={(e) => {
+                    const opt = VTON_RESOLUTION_OPTIONS[Number(e.target.value)];
+                    if (opt) updateInferenceParams({ resolution: opt.id });
+                  }}
+                  className="w-full accent-flame h-1.5 bg-bone-deep rounded-lg cursor-pointer"
+                />
+              </div>
             </div>
 
             <button
@@ -1171,8 +1247,8 @@ function TryOnContent() {
 
       {/* Person Picker Modal */}
       {isPersonPickerOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-lg rounded-3xl border border-line bg-paper p-6 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 sm:p-6 backdrop-blur-sm overflow-y-auto">
+          <div className="w-full max-w-lg rounded-3xl border border-line bg-paper p-6 shadow-2xl m-auto max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-line mb-4">
               <h3 className="font-display text-lg font-bold text-ink">
                 Choose Person Profile
@@ -1253,8 +1329,8 @@ function TryOnContent() {
 
       {/* Garment Picker Modal */}
       {isGarmentPickerOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-2xl max-h-[85vh] flex flex-col rounded-3xl border border-line bg-paper p-6 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 sm:p-6 backdrop-blur-sm overflow-y-auto">
+          <div className="w-full max-w-2xl max-h-[85vh] flex flex-col rounded-3xl border border-line bg-paper p-6 shadow-2xl m-auto">
             <div className="flex items-center justify-between pb-3 border-b border-line mb-3">
               <div>
                 <h3 className="font-display text-lg font-bold text-ink flex items-center gap-2">

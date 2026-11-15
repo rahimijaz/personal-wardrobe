@@ -130,8 +130,8 @@ export async function POST(req: Request) {
         console.warn("Auto color extraction failed, using manual or default values:", e);
       }
 
-      // If category was not explicitly assigned by the user (or is default "tops"), auto-detect silhouette
-      if (!isExplicitCategory || category === "tops") {
+      // If category was not explicitly assigned by the user or an upstream detector, auto-detect silhouette
+      if (!isExplicitCategory) {
         try {
           const detectedCategory = await detectCategoryFromFile(diskFilePath);
           if (detectedCategory) {

@@ -59,6 +59,7 @@ interface WardrobeContextType {
   cancelActiveJob: () => Promise<void>;
   clearActiveJob: () => void;
   toggleFavoriteGarment: (id: string) => Promise<void>;
+  renameGarment: (id: string, newName: string) => Promise<Garment | null>;
   deleteGarment: (id: string) => Promise<boolean>;
   toggleFavoriteOutfit: (id: string) => Promise<void>;
   deleteOutfit: (id: string) => Promise<boolean>;
@@ -355,6 +356,29 @@ export function WardrobeProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const renameGarment = async (id: string, newName: string): Promise<Garment | null> => {
+    const trimmed = newName.trim();
+    if (!trimmed) return null;
+    try {
+      const res = await fetch(`/api/garments/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const updated = data.garment as Garment;
+        setGarments((prev) =>
+          prev.map((g) => (g.id === id ? { ...g, name: updated.name } : g))
+        );
+        return updated;
+      }
+    } catch (err) {
+      console.error("Failed to rename garment:", err);
+    }
+    return null;
+  };
+
   const deleteGarment = async (id: string): Promise<boolean> => {
     try {
       const res = await fetch(`/api/garments/${id}`, { method: "DELETE" });
@@ -444,6 +468,7 @@ export function WardrobeProvider({ children }: { children: React.ReactNode }) {
         cancelActiveJob,
         clearActiveJob,
         toggleFavoriteGarment,
+        renameGarment,
         deleteGarment,
         toggleFavoriteOutfit,
         deleteOutfit,

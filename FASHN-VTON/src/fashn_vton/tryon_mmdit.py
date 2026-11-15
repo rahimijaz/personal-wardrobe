@@ -1277,7 +1277,7 @@ class TryOnModel(nn.Module):
 
     def __init__(
         self,
-        input_shape: Tuple[int] = (672  , 444),
+        input_shape: Tuple[int] = (756, 504),
         hidden_size: int = 1280,
         n_heads=10,
         double_blocks_depth: int = 8,
@@ -1719,10 +1719,11 @@ class TryOnModel(nn.Module):
         txt = garment_images
         vec = t
 
-        # Check cached positional embeddings
+        # Check cached positional embeddings (must match batch_size, sequence length, and device)
         if (
             self._cached_pe is not None
             and self._cached_pe.shape[0] == batch_size
+            and self._cached_pe.shape[1] == (x_ids.shape[1] * 2)
             and self._cached_pe.device == device
         ):
             pe = self._cached_pe

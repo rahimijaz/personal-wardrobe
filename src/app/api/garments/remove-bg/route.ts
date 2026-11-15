@@ -52,6 +52,7 @@ export async function POST(req: Request) {
       image: data.image,
       width: data.width,
       height: data.height,
+      category: data.category,
     });
   } catch (err: any) {
     console.error("Error during background removal:", err);

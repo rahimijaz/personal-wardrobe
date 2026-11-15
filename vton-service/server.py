@@ -63,7 +63,13 @@ def _decode_image(value, field: str):
     if not raw:
         raise ValueError(f"'{field}' is empty.")
     try:
-        return Image.open(io.BytesIO(raw)).convert("RGB")
+        img = Image.open(io.BytesIO(raw))
+        if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+            white_bg = Image.new("RGB", img.size, (255, 255, 255))
+            rgba_img = img.convert("RGBA")
+            white_bg.paste(rgba_img, (0, 0), rgba_img)
+            return white_bg
+        return img.convert("RGB")
     except Exception as exc:
         raise ValueError(f"'{field}' is not a readable image.") from exc
 
@@ -95,34 +101,275 @@ def _get_rmbg_model():
     return _RMBG_MODEL
 
 
+def _classify_garment_mask(alpha_u8):
+    """Accurately classifies garment into 'tops', 'bottoms', 'one-pieces', or 'shoes' from clean alpha mask."""
+    import numpy as np
+
+    fg = alpha_u8 > 48
+    rows = np.where(np.any(fg, axis=1))[0]
+    cols = np.where(np.any(fg, axis=0))[0]
+    if len(rows) < 15 or len(cols) < 15:
+        return "tops"
+
+    y1, y2 = rows[0], rows[-1]
+    x1, x2 = cols[0], cols[-1]
+    h = y2 - y1 + 1
+    w = x2 - x1 + 1
+    ar = h / max(1, w)
+
+    if ar <= 0.55:
+        return "shoes"
+
+    crop = fg[y1 : y2 + 1, x1 : x2 + 1]
+    band_h = h / 10.0
+    widths = []
+    for b in range(10):
+        b_slice = crop[int(b * band_h) : int((b + 1) * band_h), :]
+        if not np.any(b_slice):
+            widths.append(0)
+            continue
+        c_active = np.where(np.any(b_slice, axis=0))[0]
+        widths.append(c_active[-1] - c_active[0] + 1)
+
+    upper_w = np.mean(widths[:3])
+    mid_w = np.mean(widths[3:7])
+    lower_w = np.mean(widths[7:])
+
+    cx1 = int(w * 0.44)
+    cx2 = int(w * 0.56) + 1
+    cy1 = int(h * 0.55)
+    cy2 = int(h * 0.92)
+    center_strip = crop[cy1:cy2, cx1:cx2]
+    center_solid_ratio = np.mean(center_strip) if center_strip.size > 0 else 0.0
+
+    lower_slice = crop[cy1:cy2, :]
+    two_segments_count = 0
+    num_rows = lower_slice.shape[0]
+    for r in range(num_rows):
+        row = lower_slice[r, :]
+        diffs = np.diff(row.astype(int))
+        rising_edges = np.sum(diffs == 1)
+        mid_pix = row[cx1:cx2]
+        if rising_edges >= 2 and np.mean(mid_pix) < 0.2:
+            two_segments_count += 1
+    two_leg_ratio = two_segments_count / max(1, num_rows)
+
+    # 1. Clear leg split (empty center between two legs) -> bottoms
+    if (two_leg_ratio >= 0.20 or center_solid_ratio <= 0.45) and ar >= 0.95:
+        return "bottoms"
+
+    # 2. Flared A-line dress / gown: only if unmistakable flared bottom hem (> 1.5x wider than top)
+    if ar >= 1.55 and lower_w >= upper_w * 1.50 and center_solid_ratio >= 0.70 and two_leg_ratio <= 0.05:
+        return "one-pieces"
+
+    # 3. Tall garments (ar >= 1.25):
+    if ar >= 1.25:
+        # Upper garment with sleeves: shoulders/sleeves are wide (upper_w >= mid_w * 1.08) and torso is solid
+        if upper_w >= mid_w * 1.08 and upper_w >= lower_w * 1.02 and center_solid_ratio >= 0.65:
+            return "tops"
+        # Tall straight silhouette is trousers / jeans / pants (bottoms)
+        return "bottoms"
+
+    # 4. Standard height / boxy garments (ar < 1.25):
+    # Only shorts with an unmistakable split between two legs are bottoms
+    if two_leg_ratio >= 0.35 and center_solid_ratio <= 0.30:
+        return "bottoms"
+
+    # 5. Standard upper garment (torso solid in center, wide shoulders) -> tops
+    return "tops"
+
+
+def _is_already_white_bg(pil_img, thresh=240):
+    """Returns True if the image already has a clean white studio backdrop."""
+    import numpy as np
+
+    rgb = pil_img.convert("RGB")
+    arr = np.array(rgb)
+    H, W, _ = arr.shape
+    b_size = max(6, min(24, H // 25, W // 25))
+    borders = np.concatenate([
+        arr[:b_size, :].reshape(-1, 3),
+        arr[-b_size:, :].reshape(-1, 3),
+        arr[:, :b_size].reshape(-1, 3),
+        arr[:, -b_size:].reshape(-1, 3),
+    ], axis=0)
+    median_rgb = np.median(borders, axis=0)
+    p5_rgb = np.percentile(borders, 5, axis=0)
+    std_rgb = float(np.std(borders, axis=0).mean())
+    return bool(np.all(median_rgb >= thresh) and np.all(p5_rgb >= 220) and std_rgb <= 14.0)
+
+
+def _pad_and_center_on_white(img, padding_ratio=0.12):
+    """
+    Finds the garment foreground and centers it on a clean pure white canvas (3:4 aspect ratio)
+    with generous breathing margins (so pants are panned out / zoomed out and don't crowd the frame).
+    """
+    import numpy as np
+    from PIL import Image
+
+    rgb = img.convert("RGB")
+    arr = np.array(rgb)
+    H, W, _ = arr.shape
+
+    # Find garment pixels (diff from 255, 255, 255)
+    diff = np.max(255 - arr, axis=2)
+    fg = diff > 16
+    if img.mode == "RGBA":
+        a = np.array(img)[:, :, 3]
+        fg = (a > 32) & fg
+
+    rows = np.where(np.any(fg, axis=1))[0]
+    cols = np.where(np.any(fg, axis=0))[0]
+
+    if len(rows) < 20 or len(cols) < 20:
+        white_bg = Image.new("RGB", (W, H), (255, 255, 255))
+        if img.mode == "RGBA":
+            white_bg.paste(img, (0, 0), img)
+        else:
+            white_bg.paste(img, (0, 0))
+        return white_bg
+
+    y1, y2 = int(rows[0]), int(rows[-1])
+    x1, x2 = int(cols[0]), int(cols[-1])
+    garment_crop = img.crop((x1, y1, x2 + 1, y2 + 1))
+    gw, gh = garment_crop.size
+
+    # Usable ratio: 1.0 - 2 * padding_ratio (e.g. 0.76 for 12% padding)
+    usable_ratio = max(0.60, min(0.85, 1.0 - (2 * padding_ratio)))
+
+    req_w = gw / usable_ratio
+    req_h = gh / usable_ratio
+
+    # Canvas must have 3:4 aspect ratio (width : height = 3 : 4)
+    if req_h * 0.75 >= req_w:
+        target_canvas_h = max(1024, int(req_h))
+        target_canvas_w = int(target_canvas_h * 0.75)
+    else:
+        target_canvas_w = max(768, int(req_w))
+        target_canvas_h = int(target_canvas_w * 4 / 3)
+
+    max_allow_w = int(target_canvas_w * usable_ratio)
+    max_allow_h = int(target_canvas_h * usable_ratio)
+    scale = min(max_allow_w / max(1, gw), max_allow_h / max(1, gh))
+
+    new_gw = max(10, int(gw * scale))
+    new_gh = max(10, int(gh * scale))
+    garment_scaled = garment_crop.resize((new_gw, new_gh), Image.LANCZOS)
+
+    canvas = Image.new("RGB", (target_canvas_w, target_canvas_h), (255, 255, 255))
+    px = max(0, (target_canvas_w - new_gw) // 2)
+    py = max(0, (target_canvas_h - new_gh) // 2)
+
+    if garment_scaled.mode == "RGBA":
+        canvas.paste(garment_scaled, (px, py), garment_scaled)
+    else:
+        canvas.paste(garment_scaled, (px, py))
+
+    return canvas
+
+
 def _process_background_removal(pil_img):
-    """Takes a PIL image and returns an RGBA PIL image with the background cleanly removed."""
+    """
+    Takes a PIL image and returns:
+      1. Solid pure-white background PIL image with the garment cleanly isolated and panned out.
+      2. Detected garment category ('tops', 'bottoms', 'one-pieces', 'shoes').
+    """
+    import cv2
+    import numpy as np
     import torch
-    import torchvision.transforms as transforms
     import torchvision.transforms.functional as F
     from PIL import Image
 
+    # If image has an alpha channel, composite it over pure white first
+    # (prevents PIL convert('RGB') from turning transparent background into black)
+    if pil_img.mode in ("RGBA", "LA") or (pil_img.mode == "P" and "transparency" in pil_img.info):
+        white_bg = Image.new("RGB", pil_img.size, (255, 255, 255))
+        rgba_img = pil_img.convert("RGBA")
+        white_bg.paste(rgba_img, (0, 0), rgba_img)
+        pil_img = white_bg
+
+    # If the image ALREADY has a clean studio white background, skip neural segmentation!
+    if _is_already_white_bg(pil_img):
+        print("[RMBG] Image already has a clean white background. Preserving original photo & panning out.")
+        rgb = pil_img.convert("RGB")
+        arr = np.array(rgb)
+        diff = np.max(255 - arr, axis=2)
+        alpha_u8 = np.where(diff > 18, 255, 0).astype(np.uint8)
+        detected_category = _classify_garment_mask(alpha_u8)
+        padded_img = _pad_and_center_on_white(pil_img, padding_ratio=0.10)
+        return padded_img, detected_category
+
+    # Otherwise, image has a non-white / textured background -> run RMBG-1.4
     model = _get_rmbg_model()
-    orig_size = pil_img.size
-    input_img = pil_img.convert("RGB").resize((1024, 1024), Image.BILINEAR)
+    orig_rgb = pil_img.convert("RGB")
+    orig_np = np.array(orig_rgb).astype(np.float32)
+    H, W, _ = orig_np.shape
+
+    # 1. Sample corners to estimate studio backdrop color & variance
+    sample_sz = max(8, min(24, H // 20, W // 20))
+    corners = np.concatenate([
+        orig_np[:sample_sz, :sample_sz].reshape(-1, 3),
+        orig_np[:sample_sz, -sample_sz:].reshape(-1, 3),
+        orig_np[-sample_sz:, :sample_sz].reshape(-1, 3),
+        orig_np[-sample_sz:, -sample_sz:].reshape(-1, 3),
+    ], axis=0)
+    bg_color = np.median(corners, axis=0)
+    bg_std = float(np.std(corners, axis=0).mean())
+    color_dist = np.sqrt(np.sum((orig_np - bg_color) ** 2, axis=2))
+
+    # 2. Run RMBG-1.4 segmentation
+    input_img = orig_rgb.resize((1024, 1024), Image.BILINEAR)
     tensor = F.to_tensor(input_img).unsqueeze(0)
     tensor = F.normalize(tensor, [0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
     with torch.no_grad():
         out = model(tensor)
-        # Bria RMBG-1.4 produces values in [0, 1] - avoid duplicate sigmoid!
         pred = out[0][0].cpu().squeeze()
-        ma = torch.max(pred)
-        mi = torch.min(pred)
-        if ma > mi:
-            pred = (pred - mi) / (ma - mi)
-        else:
-            pred = torch.clamp(pred, 0.0, 1.0)
 
-    pred_pil = transforms.ToPILImage()(pred).resize(orig_size, Image.BILINEAR)
-    result = pil_img.convert("RGBA")
-    result.putalpha(pred_pil)
-    return result
+    # 3. Contrast S-curve: suppress float noise floor (< 0.25) and solid-fill foreground (> 0.80)
+    low, high = 0.25, 0.80
+    pred_clamped = torch.clamp((pred - low) / (high - low), 0.0, 1.0)
+    pred_smooth = (pred_clamped * pred_clamped * (3.0 - 2.0 * pred_clamped)).numpy()
+    pred_full = cv2.resize(pred_smooth, (W, H), interpolation=cv2.INTER_LINEAR)
+
+    # 4. Background color gating: eliminate white studio areas that RMBG missed (like between pants legs)
+    bg_thresh = max(10.0, min(22.0, bg_std * 2.5 + 8.0))
+    is_exact_bg = color_dist < bg_thresh
+
+    alpha = pred_full.copy()
+    alpha[is_exact_bg & (pred_full < 0.90)] = 0.0
+    alpha[color_dist < 6.0] = 0.0
+    alpha = np.clip(alpha, 0.0, 1.0)
+
+    # 5. Connected Component Filtering: remove isolated floating background smoke/speckles
+    bin_fg = (alpha > 0.20).astype(np.uint8)
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(bin_fg, connectivity=8)
+    if num_labels > 1:
+        areas = stats[1:, cv2.CC_STAT_AREA]
+        max_idx = int(np.argmax(areas))
+        max_area = areas[max_idx]
+        valid_labels = [1 + i for i, a in enumerate(areas) if a >= 0.03 * max_area]
+        keep = np.isin(labels, valid_labels)
+        alpha = np.where(keep, alpha, 0.0)
+
+    alpha_u8 = (alpha * 255.0).astype(np.uint8)
+
+    # 6. Composite cleanly onto solid pure white background (255, 255, 255)
+    # Decontaminate edge fringes so there is NO dark or off-color edge halo
+    a_3d = alpha[:, :, None]
+    # Edge decontamination against detected background color
+    clean_fg = np.where(a_3d > 0.05, (orig_np - (1.0 - np.maximum(a_3d, 0.2)) * bg_color) / np.maximum(a_3d, 0.2), 255.0)
+    clean_fg = np.clip(clean_fg, 0, 255)
+    blended = clean_fg * a_3d + 255.0 * (1.0 - a_3d)
+    res_rgb = np.clip(blended, 0, 255).astype(np.uint8)
+
+    white_canvas = Image.fromarray(res_rgb, mode="RGB")
+    detected_category = _classify_garment_mask(alpha_u8)
+
+    # Pan out / zoom out so it has breathing room and looks clean on 3:4 canvas
+    padded_img = _pad_and_center_on_white(white_canvas, padding_ratio=0.12)
+
+    return padded_img, detected_category
 
 
 def auto_frame_person_for_vton(
@@ -291,11 +538,26 @@ def _worker_loop():
             guidance = job["params"].get("guidance_scale")
             seed = job["params"].get("seed")
 
+            # Parse target resolution for TryOnModel (default: 756x504)
+            res_str = job["params"].get("resolution", "756x504")
+            input_shape = (756, 504)
+            if isinstance(res_str, str) and "x" in res_str:
+                try:
+                    parts = res_str.lower().split("x")
+                    input_shape = (int(parts[0]), int(parts[1]))
+                except Exception:
+                    input_shape = (756, 504)
+            elif isinstance(res_str, (list, tuple)) and len(res_str) == 2:
+                input_shape = (int(res_str[0]), int(res_str[1]))
+
+            print(f"[{time.strftime('%H:%M:%S')}] Job {job_id} starting with resolution: {input_shape[0]}x{input_shape[1]} (requested '{res_str}')")
+
             # Intelligently auto-frame the persona onto standard 2:3 canvas respecting calibrated specs
             persona_specs = job["params"].get("persona_specs") or {}
             target_ratio = 1.15 if persona_specs.get("framing") == "three-quarters" else 0.88
             spec_info = f"{persona_specs.get('height_cm', 175)}cm • {str(persona_specs.get('body_silhouette', 'regular')).title()} • {persona_specs.get('posture', 'standing-frontal')} • {persona_specs.get('lighting', 'studio-neutral')}" if persona_specs else "Standard calibrated"
-            update_stage("preparing_person", step=0, total_steps=overall_total_steps, detail=f"Framing persona ({spec_info}) with safe head & foot margins on 2:3 canvas...")
+            res_info = f"{input_shape[0]}x{input_shape[1]}"
+            update_stage("preparing_person", step=0, total_steps=overall_total_steps, detail=f"Framing persona ({spec_info}) at {res_info} resolution with safe margins...")
             current_img = auto_frame_person_for_vton(person_img, target_person_height_ratio=target_ratio)
 
             for pass_idx, g_item in enumerate(garments_list, start=1):
@@ -337,6 +599,7 @@ def _worker_loop():
                         skip_cfg_last_n_steps=skip_cfg,
                         guidance_scale=guidance,
                         seed=seed,
+                        input_shape=input_shape,
                         on_stage_change=pass_cb,
                     )
                 else:
@@ -500,6 +763,8 @@ class Handler(BaseHTTPRequestHandler):
             guidance = body.get("guidance_scale")
             seed = body.get("seed")
             device = body.get("device")
+            resolution = body.get("resolution", "756x504")
+            persona_specs = body.get("persona_specs")
 
             # Support garments array or single garment
             garments_list = []
@@ -548,6 +813,8 @@ class Handler(BaseHTTPRequestHandler):
                         "guidance_scale": guidance,
                         "seed": seed,
                         "device": device,
+                        "resolution": resolution,
+                        "persona_specs": persona_specs,
                     },
                     "created_at": time.time(),
                 }
@@ -565,12 +832,13 @@ class Handler(BaseHTTPRequestHandler):
 
             try:
                 pil_img = _decode_image(raw_image, "image")
-                cutout_img = _process_background_removal(pil_img)
+                cutout_img, detected_category = _process_background_removal(pil_img)
                 cutout_b64 = _encode_png(cutout_img)
                 self._send_json(200, {
                     "image": f"data:image/png;base64,{cutout_b64}",
                     "width": cutout_img.width,
                     "height": cutout_img.height,
+                    "category": detected_category,
                 })
             except Exception as e:
                 traceback.print_exc()

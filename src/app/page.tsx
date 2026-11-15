@@ -373,11 +373,11 @@ export default function DashboardPage() {
                   transition={{ delay: 0.05 + i * 0.06 }}
                   className="group relative flex flex-col overflow-hidden rounded-2xl border border-line bg-paper card-shadow transition-all duration-200 hover:-translate-y-1.5"
                 >
-                  <div className="relative aspect-[3/4] w-full overflow-hidden bg-bone-deep img-zoom">
+                  <div className="relative aspect-[3/4] w-full overflow-hidden bg-white dark:bg-white flex items-center justify-center p-2.5 img-zoom">
                     <img
                       src={garment.image}
                       alt={garment.name}
-                      className="h-full w-full object-cover"
+                      className="h-full w-full object-contain"
                     />
 
                     {/* Overlay on hover */}

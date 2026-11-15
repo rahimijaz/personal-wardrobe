@@ -78,7 +78,7 @@ export async function detectCategoryFromFile(absPath: string): Promise<GarmentCa
   try {
     const raw = await sharp(absPath)
       .rotate()
-      .resize(96, 96, { fit: "fill" })
+      .resize(160, 160, { fit: "inside", withoutEnlargement: false })
       .ensureAlpha()
       .raw()
       .toBuffer({ resolveWithObject: true });
