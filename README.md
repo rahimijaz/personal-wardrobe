@@ -2,9 +2,6 @@
 
 Digitize your closet, explore outfit combinations with color theory, and preview how clothes look on you using a **fully local, GPU-accelerated AI virtual try-on engine**. No cloud APIs, no subscriptions, no uploads.
 
-<!-- TODO: add hero screenshot or try-on before/after image here -->
-<!-- ![Try-On Studio](docs/screenshots/try-on.png) -->
-
 ```
 UPLOAD ──▶ BACKGROUND REMOVAL (RMBG-1.4) ──▶ COLOR & PATTERN EXTRACTION
                                                       │
@@ -29,24 +26,6 @@ Everything runs **100% on your machine**:
 - **Privacy-first**: your photos, wardrobe, and generated looks never leave your computer.
 - **Hardware accelerated**: tested on an **AMD Radeon RX 6600 XT** via **DirectML** on Windows. Other AMD, Intel, and NVIDIA GPUs should work through DirectML or CUDA, but are untested.
 - **Zero database setup**: plain disk storage (`data/wardrobe.json` + `public/uploads/`).
-
----
-
-## Screenshots
-
-<!-- TODO: add screenshots below -->
-
-| Wardrobe Catalog | Batch Upload |
-| :---: | :---: |
-| _screenshot coming soon_ | _screenshot coming soon_ |
-
-| Virtual Try-On Studio | Color Harmony Lab |
-| :---: | :---: |
-| _screenshot coming soon_ | _screenshot coming soon_ |
-
-| Persona Calibration | Lookbook |
-| :---: | :---: |
-| _screenshot coming soon_ | _screenshot coming soon_ |
 
 ---
 
